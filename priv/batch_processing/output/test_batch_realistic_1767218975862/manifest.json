@@ -1,0 +1,410 @@
+{
+  "timestamp": "2025-12-31T22:09:35.903470Z",
+  "files": [
+    {
+      "status": "success",
+      "filename": "001_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/001_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "002_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/002_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "003_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/003_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "004_837p_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/004_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "005_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/005_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "006_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/006_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "007_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/007_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "008_837p_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/008_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "009_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/009_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "010_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/010_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "011_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/011_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "012_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/012_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "013_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/013_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "014_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/014_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "015_837p_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/015_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "016_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/016_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "017_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/017_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "018_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/018_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "019_837p_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/019_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "020_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/020_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "021_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/021_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "022_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/022_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "023_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/023_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "024_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/024_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "025_837p_valid.x12",
+      "processing_time_ms": 2,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/025_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "026_837p_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/026_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "027_837p_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/027_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "028_837i_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/028_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "029_837i_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/029_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "030_837i_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/030_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "031_837i_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/031_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "032_837i_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/032_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "033_837i_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/033_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "034_837i_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/034_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "035_837i_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/035_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "036_837i_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/036_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "037_837i_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/037_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "038_837i_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/038_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "039_837d_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/039_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "040_837d_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/040_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "041_837d_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/041_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "042_837d_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/042_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "043_837d_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/043_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "044_837d_valid.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/044_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "045_837d_valid.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/output/test_batch_realistic_1767218975862/045_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "failed",
+      "filename": "046_error_error.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/failed/test_batch_realistic_1767218975862/046_error_error.x12",
+      "error_message": "\"File too short to contain valid ISA segment\"",
+      "claims_count": null
+    },
+    {
+      "status": "failed",
+      "filename": "047_error_error.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/failed/test_batch_realistic_1767218975862/047_error_error.x12",
+      "error_message": "\"File too short to contain valid ISA segment\"",
+      "claims_count": null
+    },
+    {
+      "status": "failed",
+      "filename": "048_error_error.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/failed/test_batch_realistic_1767218975862/048_error_error.x12",
+      "error_message": "\"File too short to contain valid ISA segment\"",
+      "claims_count": null
+    },
+    {
+      "status": "failed",
+      "filename": "049_error_error.x12",
+      "processing_time_ms": 0,
+      "output_path": "priv/batch_processing/failed/test_batch_realistic_1767218975862/049_error_error.x12",
+      "error_message": "\"File too short to contain valid ISA segment\"",
+      "claims_count": null
+    },
+    {
+      "status": "failed",
+      "filename": "050_error_error.x12",
+      "processing_time_ms": 1,
+      "output_path": "priv/batch_processing/failed/test_batch_realistic_1767218975862/050_error_error.x12",
+      "error_message": "\"File too short to contain valid ISA segment\"",
+      "claims_count": null
+    }
+  ],
+  "batch_id": "test_batch_realistic_1767218975862",
+  "total_files": 50,
+  "successful_files": 45,
+  "failed_files": 5,
+  "total_processing_time_ms": 37
+}

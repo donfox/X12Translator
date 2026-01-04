@@ -1,0 +1,50 @@
+{
+  "timestamp": "2025-12-31T22:09:35.944018Z",
+  "files": [
+    {
+      "status": "success",
+      "filename": "001_837p_valid.x12",
+      "processing_time_ms": 2,
+      "output_path": "priv/batch_processing/output/test_batch_quick_1767218975937/001_837p_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "002_837i_valid.x12",
+      "processing_time_ms": 3,
+      "output_path": "priv/batch_processing/output/test_batch_quick_1767218975937/002_837i_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "003_837d_valid.x12",
+      "processing_time_ms": 3,
+      "output_path": "priv/batch_processing/output/test_batch_quick_1767218975937/003_837d_valid.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "success",
+      "filename": "004_837p_multi.x12",
+      "processing_time_ms": 3,
+      "output_path": "priv/batch_processing/output/test_batch_quick_1767218975937/004_837p_multi.json",
+      "error_message": null,
+      "claims_count": 1
+    },
+    {
+      "status": "failed",
+      "filename": "005_837p_error.x12",
+      "processing_time_ms": 3,
+      "output_path": "priv/batch_processing/failed/test_batch_quick_1767218975937/005_837p_error.x12",
+      "error_message": "\"File too short to contain valid ISA segment\"",
+      "claims_count": null
+    }
+  ],
+  "batch_id": "test_batch_quick_1767218975937",
+  "total_files": 5,
+  "successful_files": 4,
+  "failed_files": 1,
+  "total_processing_time_ms": 3
+}

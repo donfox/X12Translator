@@ -1,0 +1,160 @@
+{
+  "claims": [
+    {
+      "claim_id": "CLAIM000000026",
+      "service_lines": [
+        {
+          "line_number": "3",
+          "dates": [
+            {
+              "value": "2024-12-15",
+              "format": "D8",
+              "qualifier": "472",
+              "qualifier_name": "Service"
+            }
+          ],
+          "quantity": 1,
+          "service_type": "professional",
+          "procedure": {
+            "code": "93000",
+            "qualifier": "HC"
+          },
+          "charge": 150.0,
+          "unit_or_basis": "UN",
+          "diagnosis_code_pointers": [
+            1
+          ]
+        },
+        {
+          "line_number": "2",
+          "dates": [
+            {
+              "value": "2024-12-15",
+              "format": "D8",
+              "qualifier": "472",
+              "qualifier_name": "Service"
+            }
+          ],
+          "quantity": 1,
+          "service_type": "professional",
+          "procedure": {
+            "code": "80053",
+            "qualifier": "HC"
+          },
+          "charge": 200.0,
+          "unit_or_basis": "UN",
+          "diagnosis_code_pointers": [
+            1
+          ]
+        },
+        {
+          "line_number": "1",
+          "dates": [
+            {
+              "value": "2024-12-15",
+              "format": "D8",
+              "qualifier": "472",
+              "qualifier_name": "Service"
+            }
+          ],
+          "quantity": 1,
+          "service_type": "professional",
+          "procedure": {
+            "code": "99213",
+            "qualifier": "HC"
+          },
+          "charge": 150.0,
+          "unit_or_basis": "UN",
+          "diagnosis_code_pointers": [
+            1
+          ]
+        }
+      ],
+      "total_charge": 500.0,
+      "subscriber": null,
+      "patient": null,
+      "rendering_provider": {
+        "name": {
+          "first": "ROBERT",
+          "last": "JOHNSON",
+          "full": "ROBERT A JOHNSON",
+          "middle": "A"
+        },
+        "entity_type": "Person",
+        "entity_identifier": "82",
+        "identification": {
+          "code": "9876543210",
+          "qualifier": "XX"
+        }
+      },
+      "dates": [
+        {
+          "value": "2024-12-15",
+          "format": "D8",
+          "qualifier": "472",
+          "qualifier_name": "Service"
+        },
+        {
+          "value": "2024-12-15",
+          "format": "D8",
+          "qualifier": "431",
+          "qualifier_name": "Onset of Current Symptoms"
+        }
+      ],
+      "diagnosis_codes": [
+        {
+          "code": "J189",
+          "qualifier": "ABK"
+        },
+        {
+          "code": "E119",
+          "qualifier": "ABK"
+        }
+      ],
+      "claim_filing_indicator": "11:B:1"
+    }
+  ],
+  "transaction": {
+    "type": "837",
+    "receiver": {
+      "name": {
+        "organization": "BLUE CROSS BLUE SHIELD"
+      },
+      "entity_type": "Non-Person Entity",
+      "entity_identifier": "40",
+      "identification": {
+        "code": "REC456",
+        "qualifier": "46"
+      }
+    },
+    "submitter": {
+      "name": {
+        "organization": "ACME MEDICAL BILLING"
+      },
+      "entity_type": "Non-Person Entity",
+      "entity_identifier": "41",
+      "identification": {
+        "code": "SUB123",
+        "qualifier": "46"
+      }
+    },
+    "control_number": "0001",
+    "interchange_control": "000000026",
+    "functional_group_control": "1",
+    "primary_billing_provider": {
+      "name": {
+        "organization": "CITY HOSPITAL CLINIC"
+      },
+      "entity_type": "Non-Person Entity",
+      "entity_identifier": "85",
+      "identification": {
+        "code": "1234567890",
+        "qualifier": "XX"
+      }
+    }
+  },
+  "summary": {
+    "total_claims": 1,
+    "total_service_lines": 3
+  }
+}

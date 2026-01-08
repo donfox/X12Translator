@@ -59,17 +59,52 @@ defmodule X12Bridge.X12.Converter do
     envelopes = Parser.extract_envelopes(segments)
     loops = Parser.identify_loops(segments)
 
-    transaction_info = extract_transaction_info(segments, envelopes)
+    # Extract file info
+    file_info = extract_file_info(envelopes)
+
+    # Extract envelope details
+    interchange_header = extract_interchange_header(envelopes.isa)
+    functional_group = extract_functional_group(envelopes.gs)
+    transaction_set = extract_transaction_set(envelopes.st, segments)
+
+    # Extract entities
+    billing_provider = extract_billing_provider(segments)
+    subscriber = extract_subscriber(segments)
+
+    # Extract claims
     claims = Enum.map(loops, &extract_claim(&1, delimiters))
 
+    # Extract flat segments list
+    all_segments = extract_all_segments(segments)
+
+    # Extract groupings
+    other_entities = extract_other_entities(segments)
+    contacts = extract_contacts(segments)
+    hierarchical_levels = extract_hierarchical_levels(segments)
+    header_references = extract_header_references(segments)
+
+    # Calculate summary
+    total_service_lines = Enum.reduce(claims, 0, fn claim, acc ->
+      acc + length(Map.get(claim, :service_lines, []))
+    end)
+
     structured = %{
-      transaction: transaction_info,
+      file_info: file_info,
+      interchange_header: interchange_header,
+      functional_group: functional_group,
+      transaction_set: transaction_set,
+      billing_provider: billing_provider,
+      subscriber: subscriber,
       claims: claims,
+      all_segments: all_segments,
+      other_entities: other_entities,
+      contacts: contacts,
+      hierarchical_levels: hierarchical_levels,
+      header_references: header_references,
       summary: %{
+        total_segments: length(segments),
         total_claims: length(claims),
-        total_service_lines: Enum.reduce(claims, 0, fn claim, acc ->
-          acc + length(Map.get(claim, :service_lines, []))
-        end)
+        total_service_lines: total_service_lines
       }
     }
 
@@ -106,30 +141,95 @@ defmodule X12Bridge.X12.Converter do
     claim_filing_code = Parser.get_element(clm_segment, 5)
 
     # Find related segments
-    subscriber = find_entity_in_segments(claim_segs, "IL")
-    patient = find_entity_in_segments(claim_segs, "QC")
-    rendering_provider = find_entity_in_segments(claim_segs, "82")
+    patient_nm1 = find_entity_in_segments(claim_segs, "QC")
 
-    # Extract dates
-    dates = extract_dates(claim_segs)
+    # Extract dates with full structure
+    dates = claim_segs
+    |> Enum.filter(fn seg -> seg.id == "DTP" end)
+    |> Enum.map(fn dtp ->
+      %{
+        segment_id: "DTP",
+        date_qualifier: Parser.get_element(dtp, 1),
+        date_format: Parser.get_element(dtp, 2),
+        date_value: Parser.get_element(dtp, 3),
+        all_elements: dtp.elements
+      }
+    end)
 
-    # Extract diagnosis codes
-    diagnosis_codes = extract_diagnosis_codes(claim_segs, delimiters)
+    # Extract references with full structure
+    references = claim_segs
+    |> Enum.filter(fn seg -> seg.id == "REF" end)
+    |> Enum.map(fn ref ->
+      %{
+        segment_id: "REF",
+        reference_id_qualifier: Parser.get_element(ref, 1),
+        reference_id: Parser.get_element(ref, 2),
+        description: Parser.get_element(ref, 3),
+        all_elements: ref.elements
+      }
+    end)
+
+    # Extract diagnosis codes with full structure
+    diagnosis_codes_data = claim_segs
+    |> Enum.filter(fn seg -> seg.id == "HI" end)
+    |> List.first()
+    |> case do
+      nil -> nil
+      hi ->
+        codes = hi.elements
+        |> Enum.drop(1)
+        |> Enum.reject(fn el -> el == "" end)
+
+        %{
+          segment_id: "HI",
+          codes: codes,
+          all_elements: hi.elements
+        }
+    end
+
+    # Extract patient info if present
+    patient = if patient_nm1 do
+      %{
+        segment_id: "NM1",
+        entity_id_code: Parser.get_element(patient_nm1, 1),
+        entity_type_qualifier: Parser.get_element(patient_nm1, 2),
+        name_last_or_organization: Parser.get_element(patient_nm1, 3),
+        name_first: Parser.get_element(patient_nm1, 4),
+        name_middle: Parser.get_element(patient_nm1, 5),
+        name_prefix: Parser.get_element(patient_nm1, 6),
+        name_suffix: Parser.get_element(patient_nm1, 7),
+        id_code_qualifier: Parser.get_element(patient_nm1, 8),
+        id_code: Parser.get_element(patient_nm1, 9),
+        all_elements: patient_nm1.elements
+      }
+    else
+      nil
+    end
 
     # Extract service lines
     service_lines_data = Enum.map(service_lines, &extract_service_line(&1, delimiters))
 
-    %{
+    base_claim = %{
+      segment_id: "CLM",
       claim_id: claim_id,
-      total_charge: parse_amount(total_charge),
+      total_charge: total_charge,
       claim_filing_indicator: claim_filing_code,
-      subscriber: subscriber,
-      patient: patient,
-      rendering_provider: rendering_provider,
+      provider_signature_indicator: Parser.get_element(clm_segment, 6),
+      assignment_plan: Parser.get_element(clm_segment, 7),
+      benefits_assignment: Parser.get_element(clm_segment, 8),
+      release_info: Parser.get_element(clm_segment, 9),
+      all_elements: clm_segment.elements,
       dates: dates,
-      diagnosis_codes: diagnosis_codes,
+      references: references,
+      diagnosis_codes: diagnosis_codes_data,
       service_lines: service_lines_data
     }
+
+    if patient do
+      Map.put(base_claim, :patient, patient)
+    else
+      base_claim
+    end
   end
 
   # Extract service line information
@@ -172,130 +272,38 @@ defmodule X12Bridge.X12.Converter do
     quantity = Parser.get_element(sv1, 4)
     diagnosis_pointer = Parser.get_element(sv1, 7)
 
-    # Extract line-level dates
-    dates = extract_dates(line_segs)
-
     %{
-      service_type: "professional",
+      segment_id: "LX",
       line_number: Parser.get_element(lx_segment, 1),
-      procedure: %{
-        qualifier: procedure_qualifier,
-        code: procedure_code
-      },
-      charge: parse_amount(line_charge),
-      unit_or_basis: unit_type,
-      quantity: parse_number(quantity),
-      diagnosis_code_pointers: parse_diagnosis_pointers(diagnosis_pointer),
-      dates: dates
+      all_elements: lx_segment.elements,
+      service_info: %{
+        segment_id: "SV1",
+        procedure_info: procedure_composite,
+        line_charge: line_charge,
+        unit_basis: unit_type,
+        unit_count: quantity,
+        place_of_service: Parser.get_element(sv1, 5),
+        diagnosis_pointer: diagnosis_pointer,
+        all_elements: sv1.elements
+      }
     }
   end
 
   # Extract institutional service line (837I - SV2)
-  defp extract_institutional_service_line(lx_segment, sv2, line_segs, delimiters) do
-    # SV2 structure: SV201 (revenue code), SV202 (procedure code composite), SV203 (line charge), SV204 (unit), SV205 (quantity)
-    revenue_code = Parser.get_element(sv2, 1)
-
-    # Extract procedure code (composite element)
-    procedure_composite = Parser.get_element(sv2, 2)
-    procedure_parts = Parser.parse_composite(procedure_composite, delimiters.sub_element)
-
-    procedure_qualifier = Enum.at(procedure_parts, 0, "")
-    procedure_code = Enum.at(procedure_parts, 1, "")
-
-    # Extract other elements
-    line_charge = Parser.get_element(sv2, 3)
-    unit_type = Parser.get_element(sv2, 4)
-    quantity = Parser.get_element(sv2, 5)
-
-    # Extract line-level dates
-    dates = extract_dates(line_segs)
-
+  defp extract_institutional_service_line(lx_segment, sv2, _line_segs, _delimiters) do
     %{
-      service_type: "institutional",
+      segment_id: "LX",
       line_number: Parser.get_element(lx_segment, 1),
-      revenue_code: revenue_code,
-      procedure: %{
-        qualifier: procedure_qualifier,
-        code: procedure_code
-      },
-      charge: parse_amount(line_charge),
-      unit_or_basis: unit_type,
-      quantity: parse_number(quantity),
-      dates: dates
+      all_elements: lx_segment.elements
     }
   end
 
   # Extract dental service line (837D - SV3)
-  defp extract_dental_service_line(lx_segment, sv3, line_segs, delimiters) do
-    # SV3 structure: SV301 (procedure code composite), SV302 (line charge), SV303 (place of service),
-    # SV304 (oral cavity designation composite), SV305 (prosthesis/crown/inlay code)
-
-    # Extract procedure code (composite element)
-    procedure_composite = Parser.get_element(sv3, 1)
-    procedure_parts = Parser.parse_composite(procedure_composite, delimiters.sub_element)
-
-    procedure_qualifier = Enum.at(procedure_parts, 0, "")
-    procedure_code = Enum.at(procedure_parts, 1, "")
-
-    # Extract other elements
-    line_charge = Parser.get_element(sv3, 2)
-    place_of_service = Parser.get_element(sv3, 3)
-
-    # Extract oral cavity designation (tooth numbers/surfaces)
-    oral_cavity_composite = Parser.get_element(sv3, 4)
-    oral_cavity_parts = Parser.parse_composite(oral_cavity_composite, delimiters.sub_element)
-
-    # Extract prosthesis/crown/inlay code
-    prosthesis_code = Parser.get_element(sv3, 5)
-
-    # Extract quantity (typically number of teeth or procedures)
-    quantity = Parser.get_element(sv3, 6)
-
-    # Extract line-level dates
-    dates = extract_dates(line_segs)
-
-    # Extract tooth number/surface from TOO segment if present
-    too_segment = Enum.find(line_segs, fn seg -> seg.id == "TOO" end)
-    tooth_info = if too_segment, do: extract_tooth_information(too_segment, delimiters), else: nil
-
+  defp extract_dental_service_line(lx_segment, sv3, _line_segs, _delimiters) do
     %{
-      service_type: "dental",
+      segment_id: "LX",
       line_number: Parser.get_element(lx_segment, 1),
-      procedure: %{
-        qualifier: procedure_qualifier,
-        code: procedure_code
-      },
-      charge: parse_amount(line_charge),
-      place_of_service: place_of_service,
-      oral_cavity_designation: %{
-        area: Enum.at(oral_cavity_parts, 0, ""),
-        tooth_number: Enum.at(oral_cavity_parts, 1, ""),
-        surface: Enum.at(oral_cavity_parts, 2, "")
-      },
-      prosthesis_crown_inlay: prosthesis_code,
-      quantity: parse_number(quantity),
-      tooth_information: tooth_info,
-      dates: dates
-    }
-  end
-
-  # Extract tooth information from TOO segment (Tooth Information)
-  defp extract_tooth_information(too_segment, delimiters) do
-    # TOO01: Code list qualifier code
-    code_list_qualifier = Parser.get_element(too_segment, 1)
-
-    # TOO02: Tooth code (composite - can have multiple tooth numbers)
-    tooth_code_composite = Parser.get_element(too_segment, 2)
-    tooth_codes = Parser.parse_composite(tooth_code_composite, delimiters.sub_element)
-
-    # TOO03: Tooth surface (composite)
-    surface_composite = Parser.get_element(too_segment, 3)
-    surfaces = Parser.parse_composite(surface_composite, delimiters.sub_element)
-
-    %{
-      code_list_qualifier: code_list_qualifier,
-      tooth_codes: tooth_codes,
-      tooth_surfaces: surfaces
+      all_elements: lx_segment.elements
     }
   end
 
@@ -465,6 +473,273 @@ defmodule X12Bridge.X12.Converter do
         {num, _} -> num
         :error -> p
       end
+    end)
+  end
+
+  # NEW EXTRACTION FUNCTIONS
+
+  defp extract_file_info(envelopes) do
+    st = envelopes.st
+    gs = envelopes.gs
+
+    transaction_type = if st, do: Parser.get_element(st, 1), else: "837"
+    version = if gs, do: Parser.get_element(gs, 8), else: ""
+
+    file_type = case version do
+      v when is_binary(v) and byte_size(v) > 0 ->
+        cond do
+          String.contains?(v, "222") -> "X12 837P Professional Healthcare Claim"
+          String.contains?(v, "223") -> "X12 837I Institutional Healthcare Claim"
+          String.contains?(v, "224") -> "X12 837D Dental Healthcare Claim"
+          true -> "X12 #{transaction_type} Healthcare Claim"
+        end
+      _ -> "X12 #{transaction_type} Healthcare Claim"
+    end
+
+    %{
+      source_file: "uploaded_file",
+      file_type: file_type
+    }
+  end
+
+  defp extract_interchange_header(nil), do: %{}
+  defp extract_interchange_header(isa) do
+    %{
+      segment_id: "ISA",
+      authorization_info_qualifier: Parser.get_element(isa, 1),
+      authorization_info: Parser.get_element(isa, 2),
+      security_info_qualifier: Parser.get_element(isa, 3),
+      security_info: Parser.get_element(isa, 4),
+      sender_id_qualifier: Parser.get_element(isa, 5),
+      sender_id: Parser.get_element(isa, 6),
+      receiver_id_qualifier: Parser.get_element(isa, 7),
+      receiver_id: Parser.get_element(isa, 8),
+      interchange_date: Parser.get_element(isa, 9),
+      interchange_time: Parser.get_element(isa, 10),
+      standards_id: Parser.get_element(isa, 11),
+      version_number: Parser.get_element(isa, 12),
+      interchange_control_number: Parser.get_element(isa, 13),
+      acknowledgment_requested: Parser.get_element(isa, 14),
+      usage_indicator: Parser.get_element(isa, 15),
+      all_elements: isa.elements
+    }
+  end
+
+  defp extract_functional_group(nil), do: %{}
+  defp extract_functional_group(gs) do
+    %{
+      segment_id: "GS",
+      functional_id_code: Parser.get_element(gs, 1),
+      application_sender_code: Parser.get_element(gs, 2),
+      application_receiver_code: Parser.get_element(gs, 3),
+      date: Parser.get_element(gs, 4),
+      time: Parser.get_element(gs, 5),
+      group_control_number: Parser.get_element(gs, 6),
+      responsible_agency_code: Parser.get_element(gs, 7),
+      version_code: Parser.get_element(gs, 8),
+      all_elements: gs.elements
+    }
+  end
+
+  defp extract_transaction_set(nil, _segments), do: %{}
+  defp extract_transaction_set(st, segments) do
+    # Find BHT segment
+    bht = Parser.find_segments(segments, "BHT") |> List.first()
+
+    bht_data = if bht do
+      %{
+        segment_id: "BHT",
+        hierarchical_structure_code: Parser.get_element(bht, 1),
+        transaction_set_purpose_code: Parser.get_element(bht, 2),
+        reference_id: Parser.get_element(bht, 3),
+        date: Parser.get_element(bht, 4),
+        time: Parser.get_element(bht, 5),
+        claim_type: Parser.get_element(bht, 6),
+        all_elements: bht.elements
+      }
+    else
+      nil
+    end
+
+    %{
+      segment_id: "ST",
+      transaction_set_id: Parser.get_element(st, 1),
+      transaction_control_number: Parser.get_element(st, 2),
+      implementation_convention_ref: Parser.get_element(st, 3),
+      all_elements: st.elements,
+      beginning_hierarchical_transaction: bht_data
+    }
+  end
+
+  defp extract_billing_provider(segments) do
+    # Find NM1*85 (billing provider)
+    nm1_85 = segments
+    |> Parser.find_segments("NM1")
+    |> Enum.find(fn seg -> Parser.get_element(seg, 1) == "85" end)
+
+    if nm1_85 do
+      # Find associated address segments after this NM1
+      nm1_index = Enum.find_index(segments, fn seg -> seg == nm1_85 end)
+      following_segments = Enum.drop(segments, nm1_index + 1)
+
+      n3 = Enum.find(following_segments, fn seg -> seg.id == "N3" end)
+      n4 = Enum.find(following_segments, fn seg -> seg.id == "N4" end)
+
+      address = if n3 do
+        %{
+          segment_id: "N3",
+          address_line_1: Parser.get_element(n3, 1),
+          address_line_2: Parser.get_element(n3, 2),
+          all_elements: n3.elements
+        }
+      else
+        nil
+      end
+
+      geographic_location = if n4 do
+        %{
+          segment_id: "N4",
+          city: Parser.get_element(n4, 1),
+          state: Parser.get_element(n4, 2),
+          postal_code: Parser.get_element(n4, 3),
+          country_code: Parser.get_element(n4, 4),
+          all_elements: n4.elements
+        }
+      else
+        nil
+      end
+
+      %{
+        segment_id: "NM1",
+        entity_id_code: Parser.get_element(nm1_85, 1),
+        entity_type_qualifier: Parser.get_element(nm1_85, 2),
+        name_last_or_organization: Parser.get_element(nm1_85, 3),
+        name_first: Parser.get_element(nm1_85, 4),
+        name_middle: Parser.get_element(nm1_85, 5),
+        name_prefix: Parser.get_element(nm1_85, 6),
+        name_suffix: Parser.get_element(nm1_85, 7),
+        id_code_qualifier: Parser.get_element(nm1_85, 8),
+        id_code: Parser.get_element(nm1_85, 9),
+        all_elements: nm1_85.elements,
+        address: address,
+        geographic_location: geographic_location
+      }
+    else
+      nil
+    end
+  end
+
+  defp extract_subscriber(segments) do
+    # Find NM1*IL (subscriber/insured)
+    nm1_il = segments
+    |> Parser.find_segments("NM1")
+    |> Enum.find(fn seg -> Parser.get_element(seg, 1) == "IL" end)
+
+    if nm1_il do
+      %{
+        segment_id: "NM1",
+        entity_id_code: Parser.get_element(nm1_il, 1),
+        entity_type_qualifier: Parser.get_element(nm1_il, 2),
+        name_last_or_organization: Parser.get_element(nm1_il, 3),
+        name_first: Parser.get_element(nm1_il, 4),
+        name_middle: Parser.get_element(nm1_il, 5),
+        name_prefix: Parser.get_element(nm1_il, 6),
+        name_suffix: Parser.get_element(nm1_il, 7),
+        id_code_qualifier: Parser.get_element(nm1_il, 8),
+        id_code: Parser.get_element(nm1_il, 9),
+        all_elements: nm1_il.elements
+      }
+    else
+      nil
+    end
+  end
+
+  defp extract_all_segments(segments) do
+    Enum.map(segments, fn seg ->
+      %{
+        segment_id: seg.id,
+        elements: seg.elements
+      }
+    end)
+  end
+
+  defp extract_other_entities(segments) do
+    # Extract NM1 segments for entities 41 (submitter) and 40 (receiver)
+    segments
+    |> Parser.find_segments("NM1")
+    |> Enum.filter(fn seg ->
+      entity_code = Parser.get_element(seg, 1)
+      entity_code == "41" or entity_code == "40"
+    end)
+    |> Enum.map(fn nm1 ->
+      %{
+        segment_id: "NM1",
+        entity_id_code: Parser.get_element(nm1, 1),
+        entity_type_qualifier: Parser.get_element(nm1, 2),
+        name_last_or_organization: Parser.get_element(nm1, 3),
+        name_first: Parser.get_element(nm1, 4),
+        name_middle: Parser.get_element(nm1, 5),
+        name_prefix: Parser.get_element(nm1, 6),
+        name_suffix: Parser.get_element(nm1, 7),
+        id_code_qualifier: Parser.get_element(nm1, 8),
+        id_code: Parser.get_element(nm1, 9),
+        all_elements: nm1.elements
+      }
+    end)
+  end
+
+  defp extract_contacts(segments) do
+    segments
+    |> Parser.find_segments("PER")
+    |> Enum.map(fn per ->
+      %{
+        segment_id: "PER",
+        contact_function_code: Parser.get_element(per, 1),
+        name: Parser.get_element(per, 2),
+        communication_number_qualifier_1: Parser.get_element(per, 3),
+        communication_number_1: Parser.get_element(per, 4),
+        communication_number_qualifier_2: Parser.get_element(per, 5),
+        communication_number_2: Parser.get_element(per, 6),
+        all_elements: per.elements
+      }
+    end)
+  end
+
+  defp extract_hierarchical_levels(segments) do
+    segments
+    |> Parser.find_segments("HL")
+    |> Enum.map(fn hl ->
+      %{
+        segment_id: "HL",
+        hierarchical_id: Parser.get_element(hl, 1),
+        parent_id: Parser.get_element(hl, 2),
+        level_code: Parser.get_element(hl, 3),
+        child_code: Parser.get_element(hl, 4),
+        all_elements: hl.elements
+      }
+    end)
+  end
+
+  defp extract_header_references(segments) do
+    # Find REF segments that appear before the first CLM segment (header level)
+    clm_index = Enum.find_index(segments, fn seg -> seg.id == "CLM" end)
+
+    header_segments = if clm_index do
+      Enum.take(segments, clm_index)
+    else
+      segments
+    end
+
+    header_segments
+    |> Enum.filter(fn seg -> seg.id == "REF" end)
+    |> Enum.map(fn ref ->
+      %{
+        segment_id: "REF",
+        reference_id_qualifier: Parser.get_element(ref, 1),
+        reference_id: Parser.get_element(ref, 2),
+        description: Parser.get_element(ref, 3),
+        all_elements: ref.elements
+      }
     end)
   end
 end

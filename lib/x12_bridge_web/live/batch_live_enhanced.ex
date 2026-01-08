@@ -2,7 +2,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   @moduledoc """
   Enhanced Batch Processing page that supports:
   1. Web upload (database-backed)
-  2. Hot folder processing (file-based)
+  2. Remote import (HTTP/HTTPS)
   3. Real-time progress updates
   """
   use X12BridgeWeb, :live_view
@@ -12,6 +12,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   alias X12Bridge.Conversions
   alias X12Bridge.Conversions.Batch
   alias X12Bridge.BatchProcessor
+  alias X12Bridge.RemoteFetcher
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,14 +25,18 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
     {:ok,
      socket
+     |> assign(:current_path, "/converter")
      |> assign(:batches, batches)
      |> assign(:current_batch, nil)
-     |> assign(:show_upload, false)
-     |> assign(:processing_mode, :upload)  # :upload or :hot_folder
+     |> assign(:viewing_job_id, nil)  # Track which job's JSON is being viewed
+     |> assign(:processing_mode, :upload)  # :upload, :hot_folder, or :remote_import
      |> assign(:hot_folder_status, nil)
      |> assign(:hot_folder_result, nil)
+     |> assign(:remote_url, "")
+     |> assign(:remote_status, nil)  # nil, :processing, :completed, :error
+     |> assign(:remote_result, nil)
      |> allow_upload(:batch_files,
-         accept: [".x12", ".edi", ".txt"],
+         accept: [".x12", ".edi", ".txt", ".zip"],
          max_entries: 50,
          max_file_size: 10_000_000)}
   end
@@ -103,11 +108,92 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:hot_folder_status, nil)}
   end
 
+  # === REMOTE IMPORT EVENTS ===
+
+  @impl true
+  def handle_event("update_remote_url", %{"url" => url}, socket) do
+    {:noreply, assign(socket, :remote_url, url)}
+  end
+
+  @impl true
+  def handle_event("process_remote_batch", %{"url" => url}, socket) do
+    case RemoteFetcher.validate_url(url) do
+      {:ok, _uri} ->
+        # Spawn background task to fetch and process
+        Task.start(fn ->
+          case RemoteFetcher.fetch_and_extract(url) do
+            {:ok, %{files: file_paths, temp_dir: temp_dir}} ->
+              # Create batch in database
+              {:ok, batch} =
+                Conversions.create_batch(%{
+                  name: "Remote Import - #{extract_filename(url)}",
+                  total_files: length(file_paths)
+                })
+
+              Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
+
+              # Create jobs and read file contents
+              files_to_process =
+                Enum.map(file_paths, fn path ->
+                  {:ok, content} = File.read(path)
+
+                  {:ok, job} =
+                    Conversions.create_job(%{
+                      batch_id: batch.id,
+                      original_filename: Path.basename(path),
+                      file_size: byte_size(content),
+                      status: "pending"
+                    })
+
+                  {job.id, content}
+                end)
+
+              # Process using existing pipeline
+              Conversions.process_batch_sync(batch.id, files_to_process)
+
+              # Cleanup temporary files
+              RemoteFetcher.cleanup_temp_files(temp_dir)
+
+              # Broadcast completion
+              Phoenix.PubSub.broadcast(
+                X12Bridge.PubSub,
+                "batches",
+                {:remote_import_completed, {:ok, batch}}
+              )
+
+            {:error, reason} ->
+              Phoenix.PubSub.broadcast(
+                X12Bridge.PubSub,
+                "batches",
+                {:remote_import_completed, {:error, reason}}
+              )
+          end
+        end)
+
+        {:noreply,
+         socket
+         |> assign(:remote_status, :processing)
+         |> put_flash(:info, "Downloading and processing remote batch...")}
+
+      {:error, :invalid_url} ->
+        {:noreply, put_flash(socket, :error, "Invalid URL. Please enter a valid HTTP or HTTPS URL.")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_remote_result", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:remote_result, nil)
+     |> assign(:remote_status, nil)
+     |> assign(:remote_url, "")}
+  end
+
   # === DATABASE UPLOAD EVENTS (Original) ===
 
   @impl true
-  def handle_event("toggle_upload", _params, socket) do
-    {:noreply, assign(socket, :show_upload, !socket.assigns.show_upload)}
+  def handle_event("validate_upload", _params, socket) do
+    {:noreply, socket}
   end
 
   @impl true
@@ -117,21 +203,23 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     if length(entries) == 0 do
       {:noreply, put_flash(socket, :error, "Please select files to upload")}
     else
+      # Extract all files (including from ZIP files)
+      all_files = extract_uploaded_files(socket)
+
       {:ok, batch} = Conversions.create_batch(%{
         name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
-        total_files: length(entries)
+        total_files: length(all_files)
       })
 
       Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
 
+      # Create jobs and prepare files for processing
       files_to_process =
-        consume_uploaded_entries(socket, :batch_files, fn %{path: path}, entry ->
-          {:ok, content} = File.read(path)
-
+        Enum.map(all_files, fn {filename, content, file_size} ->
           {:ok, job} = Conversions.create_job(%{
             batch_id: batch.id,
-            original_filename: entry.client_name,
-            file_size: entry.client_size,
+            original_filename: filename,
+            file_size: file_size,
             status: "pending"
           })
 
@@ -148,48 +236,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
        socket
        |> assign(:batches, batches)
        |> assign(:current_batch, batch)
-       |> assign(:show_upload, false)
        |> put_flash(:info, "Processing #{batch.total_files} files...")}
-    end
-  end
-
-  @impl true
-  def handle_event("load_test_batch", %{"batch_name" => batch_name}, socket) do
-    case X12Bridge.TestSupport.BatchLoader.load_batch(batch_name) do
-      {:ok, batch_data} ->
-        {:ok, batch} = Conversions.create_batch(%{
-          name: "Test: #{batch_data.description}",
-          total_files: batch_data.total_files
-        })
-
-        Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
-
-        files_to_process =
-          Enum.map(batch_data.files, fn file ->
-            {:ok, job} = Conversions.create_job(%{
-              batch_id: batch.id,
-              original_filename: file.filename,
-              file_size: byte_size(file.content),
-              status: "pending"
-            })
-
-            {job.id, file.content}
-          end)
-
-        Task.start(fn ->
-          Conversions.process_batch_sync(batch.id, files_to_process)
-        end)
-
-        batches = Conversions.list_batches(limit: 10)
-
-        {:noreply,
-         socket
-         |> assign(:batches, batches)
-         |> assign(:current_batch, batch)
-         |> put_flash(:info, "Processing test batch: #{batch_name}")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to load batch: #{inspect(reason)}")}
     end
   end
 
@@ -202,6 +249,33 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   @impl true
   def handle_event("close_batch", _params, socket) do
     {:noreply, assign(socket, :current_batch, nil)}
+  end
+
+  @impl true
+  def handle_event("clear_all_batches", _params, socket) do
+    {:ok, count} = Conversions.delete_all_batches()
+    batches = Conversions.list_batches(limit: 10)
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, nil)
+     |> put_flash(:info, "Deleted #{count} batches successfully")}
+  end
+
+  @impl true
+  def handle_event("view_job_json", %{"id" => job_id}, socket) do
+    {:noreply, assign(socket, :viewing_job_id, job_id)}
+  end
+
+  @impl true
+  def handle_event("hide_job_json", _params, socket) do
+    {:noreply, assign(socket, :viewing_job_id, nil)}
+  end
+
+  @impl true
+  def handle_event("stop_propagation", _params, socket) do
+    {:noreply, socket}
   end
 
   @impl true
@@ -267,18 +341,41 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> put_flash(:info, "No files found in input directory")}
   end
 
+  @impl true
+  def handle_info({:remote_import_completed, {:ok, batch}}, socket) do
+    batches = Conversions.list_batches(limit: 10)
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:remote_status, :completed)
+     |> assign(:remote_result, batch)
+     |> assign(:current_batch, batch)
+     |> put_flash(:info, "Remote import complete! #{batch.completed_files} successful, #{batch.failed_files} failed")}
+  end
+
+  @impl true
+  def handle_info({:remote_import_completed, {:error, reason}}, socket) do
+    error_message = format_remote_error(reason)
+
+    {:noreply,
+     socket
+     |> assign(:remote_status, :error)
+     |> put_flash(:error, error_message)}
+  end
+
   # === RENDER ===
 
   @impl true
   def render(assigns) do
     ~H"""
-    <.app_layout flash={@flash}>
+    <.app_layout flash={@flash} current_path={@current_path}>
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <!-- Header -->
         <div class="mb-8">
-          <h1 class="text-3xl font-bold text-white">Batch Processing</h1>
+          <h1 class="text-3xl font-bold text-white">X12 EDI Converter</h1>
           <p class="mt-2 text-gray-300">
-            Process multiple X12 files using web upload or hot folder
+            Convert 1-50 X12 files using web upload or remote URL
           </p>
         </div>
 
@@ -292,14 +389,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 phx-value-mode="upload"
                 class={"px-4 py-2 rounded-md transition " <> if @processing_mode == :upload, do: "bg-blue-600 text-white", else: "bg-gray-700 text-gray-300 hover:bg-gray-600"}
               >
-                📤 Web Upload (Database)
+                📤 Web Upload
               </button>
               <button
                 phx-click="switch_mode"
-                phx-value-mode="hot_folder"
-                class={"px-4 py-2 rounded-md transition " <> if @processing_mode == :hot_folder, do: "bg-green-600 text-white", else: "bg-gray-700 text-gray-300 hover:bg-gray-600"}
+                phx-value-mode="remote_import"
+                class={"px-4 py-2 rounded-md transition " <> if @processing_mode == :remote_import, do: "bg-purple-600 text-white", else: "bg-gray-700 text-gray-300 hover:bg-gray-600"}
               >
-                📁 Hot Folder (File System)
+                🌐 Remote Import (HTTP/HTTPS)
               </button>
             </div>
           </div>
@@ -308,22 +405,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
         <!-- WEB UPLOAD MODE -->
         <%= if @processing_mode == :upload do %>
           <div class="mb-8 bg-white shadow rounded-lg p-6">
-            <div class="flex justify-between items-center mb-4">
-              <div>
-                <h2 class="text-xl font-semibold text-gray-900">Upload Files</h2>
-                <p class="text-sm text-gray-500">Files are stored in database and processed</p>
-              </div>
-              <button
-                phx-click="toggle_upload"
-                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                <%= if @show_upload, do: "Hide Upload", else: "Upload Files" %>
-              </button>
+            <div class="mb-4">
+              <h2 class="text-xl font-semibold text-gray-900">Upload Files</h2>
+              <p class="text-sm text-gray-500">Upload individual files or ZIP archives containing multiple X12 files</p>
             </div>
 
-            <%= if @show_upload do %>
-              <form phx-submit="process_batch" class="space-y-4">
-                <div class="border-2 border-dashed border-gray-300 rounded-lg p-6">
+            <form phx-submit="process_batch" phx-change="validate_upload" class="space-y-4">
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-6" phx-drop-target={@uploads.batch_files.ref}>
                   <.live_file_input upload={@uploads.batch_files} class="hidden" />
                   <label
                     for={@uploads.batch_files.ref}
@@ -336,13 +424,16 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                       Click to select or drag and drop files
                     </p>
                     <p class="mt-1 text-xs text-gray-500">
-                      X12, EDI, or TXT files (up to 50 files, 10MB each)
+                      X12, EDI, TXT, or ZIP files (up to 50 files, 10MB each)
+                    </p>
+                    <p class="mt-1 text-xs text-gray-400">
+                      ZIP files will be automatically extracted
                     </p>
                   </label>
 
-                  <div :for={entry <- @uploads.batch_files.entries} class="mt-4 p-2 bg-gray-50 rounded flex justify-between items-center">
-                    <span class="text-sm"><%= entry.client_name %></span>
-                    <span class="text-xs text-gray-500"><%= format_bytes(entry.client_size) %></span>
+                  <div :for={entry <- @uploads.batch_files.entries} class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg flex justify-between items-center">
+                    <span class="text-base font-semibold text-gray-900"><%= entry.client_name %></span>
+                    <span class="text-sm text-gray-600"><%= format_bytes(entry.client_size) %></span>
                   </div>
                 </div>
 
@@ -355,32 +446,25 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   </button>
                 <% end %>
               </form>
-            <% end %>
-
-            <div class="mt-6 pt-6 border-t border-gray-200">
-              <h3 class="text-sm font-medium text-gray-700 mb-2">Load Test Batch (Database Mode):</h3>
-              <div class="flex gap-2">
-                <button
-                  phx-click="load_test_batch"
-                  phx-value-batch_name="batch_quick"
-                  class="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                >
-                  Quick (5 files)
-                </button>
-                <button
-                  phx-click="load_test_batch"
-                  phx-value-batch_name="batch_realistic"
-                  class="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                >
-                  Realistic (50 files)
-                </button>
-              </div>
-            </div>
           </div>
 
-          <!-- Database Batches List -->
+          <!-- Batches List -->
           <div class="bg-white shadow rounded-lg p-6">
-            <h2 class="text-xl font-semibold text-gray-900 mb-4">Recent Batches (Database)</h2>
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-xl font-semibold text-gray-900">Recent Batches</h2>
+              <%= if length(@batches) > 0 do %>
+                <button
+                  phx-click="clear_all_batches"
+                  data-confirm="Are you sure you want to delete ALL batches? This cannot be undone."
+                  class="group flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 shadow-sm hover:shadow"
+                >
+                  <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Clear All Batches
+                </button>
+              <% end %>
+            </div>
 
             <%= if length(@batches) == 0 do %>
               <p class="text-gray-500 text-center py-8">No batches yet. Upload files to get started!</p>
@@ -428,66 +512,66 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           </div>
         <% end %>
 
-        <!-- HOT FOLDER MODE -->
-        <%= if @processing_mode == :hot_folder do %>
+        <!-- REMOTE IMPORT MODE -->
+        <%= if @processing_mode == :remote_import do %>
           <div class="mb-8 bg-white shadow rounded-lg p-6">
-            <h2 class="text-xl font-semibold text-gray-900 mb-4">Hot Folder Processing</h2>
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Remote Batch Import</h2>
             <p class="text-sm text-gray-600 mb-6">
-              Files are processed from <code class="bg-gray-100 px-2 py-1 rounded">priv/batch_processing/input/</code>
+              Fetch and process X12 files from a remote ZIP archive via HTTP/HTTPS
             </p>
 
-            <div class="space-y-4">
-              <button
-                phx-click="process_hot_folder"
-                disabled={@hot_folder_status == :processing}
-                class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <%= if @hot_folder_status == :processing, do: "Processing...", else: "🚀 Process Input Directory" %>
-              </button>
-
-              <button
-                phx-click="view_hot_folder_results"
-                class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                📂 Open Output Directory
-              </button>
-            </div>
-
-            <div class="mt-6 pt-6 border-t border-gray-200">
-              <h3 class="text-sm font-medium text-gray-700 mb-2">Process Test Batch (Hot Folder Mode):</h3>
-              <p class="text-xs text-gray-500 mb-3">These use the concurrent BatchProcessor module</p>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  phx-click="process_test_batch_hot_folder"
-                  phx-value-batch_name="batch_quick"
-                  class="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                >
-                  Quick (5 files)
-                </button>
-                <button
-                  phx-click="process_test_batch_hot_folder"
-                  phx-value-batch_name="batch_realistic"
-                  class="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                >
-                  Realistic (50 files)
-                </button>
-                <button
-                  phx-click="process_test_batch_hot_folder"
-                  phx-value-batch_name="batch_performance"
-                  class="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                >
-                  Performance (500 files)
-                </button>
+            <form phx-submit="process_remote_batch" class="space-y-4">
+              <div>
+                <label for="remote-url" class="block text-sm font-medium text-gray-700 mb-2">
+                  Remote ZIP URL
+                </label>
+                <input
+                  type="url"
+                  id="remote-url"
+                  name="url"
+                  value={@remote_url}
+                  phx-change="update_remote_url"
+                  placeholder="https://example.com/batch.zip"
+                  class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
+                  required
+                />
+                <p class="mt-2 text-xs text-gray-500">
+                  Enter the URL of a ZIP file containing X12 files (.x12, .edi, or .txt)
+                </p>
               </div>
-            </div>
 
-            <!-- Hot Folder Results -->
-            <%= if @hot_folder_result do %>
+              <button
+                type="submit"
+                disabled={@remote_status == :processing}
+                class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <%= if @remote_status == :processing, do: "⏳ Downloading and Processing...", else: "🚀 Fetch & Process" %>
+              </button>
+            </form>
+
+            <!-- Remote Processing Status -->
+            <%= if @remote_status == :processing do %>
+              <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                  <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <div>
+                    <p class="font-semibold text-blue-900">Downloading and processing...</p>
+                    <p class="text-sm text-blue-700">This may take a moment depending on file size</p>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+
+            <!-- Remote Results -->
+            <%= if @remote_result do %>
               <div class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div class="flex justify-between items-start mb-4">
-                  <h3 class="font-semibold text-green-900">✓ Processing Complete</h3>
+                  <h3 class="font-semibold text-green-900">✓ Remote Import Complete</h3>
                   <button
-                    phx-click="clear_hot_folder_result"
+                    phx-click="clear_remote_result"
                     class="text-green-700 hover:text-green-900"
                   >
                     ✕
@@ -496,58 +580,117 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
                 <div class="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <span class="text-gray-600">Batch ID:</span>
-                    <span class="ml-2 font-mono text-xs"><%= @hot_folder_result.batch_id %></span>
+                    <span class="text-gray-600">Batch Name:</span>
+                    <span class="ml-2 font-semibold"><%= @remote_result.name %></span>
                   </div>
                   <div>
                     <span class="text-gray-600">Total Files:</span>
-                    <span class="ml-2 font-semibold"><%= @hot_folder_result.total_files %></span>
+                    <span class="ml-2 font-semibold"><%= @remote_result.total_files %></span>
                   </div>
                   <div>
                     <span class="text-gray-600">Successful:</span>
-                    <span class="ml-2 font-semibold text-green-600"><%= @hot_folder_result.successful_files %></span>
+                    <span class="ml-2 font-semibold text-green-600"><%= @remote_result.completed_files %></span>
                   </div>
                   <div>
                     <span class="text-gray-600">Failed:</span>
-                    <span class="ml-2 font-semibold text-red-600"><%= @hot_folder_result.failed_files %></span>
-                  </div>
-                  <div>
-                    <span class="text-gray-600">Processing Time:</span>
-                    <span class="ml-2"><%= @hot_folder_result.processing_time_ms %>ms</span>
-                  </div>
-                  <div>
-                    <span class="text-gray-600">Throughput:</span>
-                    <span class="ml-2"><%= round(@hot_folder_result.total_files / (@hot_folder_result.processing_time_ms / 1000)) %> files/sec</span>
+                    <span class="ml-2 font-semibold text-red-600"><%= @remote_result.failed_files %></span>
                   </div>
                 </div>
 
-                <div class="mt-4 pt-4 border-t border-green-200">
-                  <p class="text-sm text-gray-700 mb-2">
-                    <strong>Output:</strong> <code class="bg-white px-2 py-1 rounded text-xs"><%= Path.basename(@hot_folder_result.output_directory) %></code>
-                  </p>
-                  <p class="text-sm text-gray-700">
-                    <strong>Manifest:</strong> <code class="bg-white px-2 py-1 rounded text-xs"><%= Path.basename(@hot_folder_result.manifest_path) %></code>
-                  </p>
-                </div>
+                <button
+                  phx-click="view_batch"
+                  phx-value-id={@remote_result.id}
+                  class="mt-4 w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                >
+                  View Batch Details
+                </button>
               </div>
             <% end %>
 
-            <!-- Directory Info -->
-            <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-              <h4 class="font-semibold text-blue-900 mb-2">📁 Directory Structure:</h4>
-              <ul class="space-y-1 text-blue-800 font-mono text-xs">
-                <li>→ Input: <code>priv/batch_processing/input/</code></li>
-                <li>→ Output: <code>priv/batch_processing/output/</code></li>
-                <li>→ Failed: <code>priv/batch_processing/failed/</code></li>
+            <!-- Info Box -->
+            <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm">
+              <h4 class="font-semibold text-purple-900 mb-2">ℹ️ How it works:</h4>
+              <ul class="space-y-1 text-purple-800 text-xs">
+                <li>1. Enter a URL pointing to a ZIP archive containing X12 files</li>
+                <li>2. The ZIP is downloaded and extracted to a temporary directory</li>
+                <li>3. All X12 files (.x12, .edi, .txt) are processed concurrently</li>
+                <li>4. Results are stored in the database and can be downloaded</li>
+                <li>5. Temporary files are automatically cleaned up</li>
               </ul>
+              <div class="mt-3 pt-3 border-t border-purple-200">
+                <p class="text-purple-900 font-medium">Limits:</p>
+                <p class="text-purple-800 text-xs">Max file size: 100 MB | Timeout: 60 seconds</p>
+              </div>
+            </div>
+
+            <!-- Database Batches List (shared with upload mode) -->
+            <div class="mt-8 pt-8 border-t border-gray-200">
+              <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-900">Recent Remote Imports</h3>
+                <%= if length(@batches) > 0 do %>
+                  <button
+                    phx-click="clear_all_batches"
+                    data-confirm="Are you sure you want to delete ALL batches? This cannot be undone."
+                    class="group flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 shadow-sm hover:shadow"
+                  >
+                    <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Clear All Batches
+                  </button>
+                <% end %>
+              </div>
+              <%= if length(@batches) == 0 do %>
+                <p class="text-gray-500 text-center py-8">No remote imports yet. Enter a URL to get started!</p>
+              <% else %>
+                <div class="space-y-4">
+                  <%= for batch <- Enum.filter(@batches, fn b -> String.starts_with?(b.name, "Remote Import") end) do %>
+                    <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
+                      <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                          <h3 class="font-medium text-gray-900"><%= batch.name %></h3>
+                          <p class="text-sm text-gray-500">
+                            <%= Calendar.strftime(batch.inserted_at, "%Y-%m-%d %H:%M") %>
+                          </p>
+                        </div>
+                        <div class="flex items-center gap-4">
+                          <div class="text-right">
+                            <div class="text-sm">
+                              <span class="text-green-600 font-medium"><%= batch.completed_files %></span> /
+                              <span class="text-red-600"><%= batch.failed_files %></span> /
+                              <span class="text-gray-600"><%= batch.total_files %></span>
+                            </div>
+                            <div class="text-xs text-gray-500">Success / Failed / Total</div>
+                          </div>
+                          <button
+                            phx-click="view_batch"
+                            phx-value-id={batch.id}
+                            class="px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+                          >
+                            View
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="mt-3 bg-gray-200 rounded-full h-2">
+                        <div
+                          class="bg-purple-600 h-2 rounded-full transition-all duration-500"
+                          style={"width: #{Batch.progress_percentage(batch)}%"}
+                        >
+                        </div>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
             </div>
           </div>
         <% end %>
 
         <!-- Batch Detail Modal (for database batches) -->
         <%= if @current_batch do %>
-          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div class="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" phx-click="close_batch">
+            <div class="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" phx-click="stop_propagation">
               <div class="p-6 border-b flex justify-between items-center">
                 <div>
                   <h2 class="text-2xl font-bold text-gray-900"><%= @current_batch.name %></h2>
@@ -580,6 +723,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                           </span>
                           <%= if job.status == "completed" do %>
                             <button
+                              phx-click={if @viewing_job_id == to_string(job.id), do: "hide_job_json", else: "view_job_json"}
+                              phx-value-id={job.id}
+                              class="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                            >
+                              <%= if @viewing_job_id == to_string(job.id), do: "Hide Comparison", else: "View Side-by-Side" %>
+                            </button>
+                            <button
                               phx-click="download_job"
                               phx-value-id={job.id}
                               class="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
@@ -595,6 +745,33 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                         </div>
                       <% end %>
                     </div>
+
+                    <!-- Side-by-Side Comparison Viewer Section -->
+                    <%= if @viewing_job_id == to_string(job.id) && job.json_result do %>
+                      <div class="mt-2 mx-4 mb-3 bg-gray-50 p-4 rounded border border-gray-300">
+                        <div class="flex justify-between items-center mb-3">
+                          <h5 class="text-sm font-medium text-gray-700">Side-by-Side Comparison:</h5>
+                          <button
+                            phx-click="hide_job_json"
+                            class="text-xs text-blue-600 hover:text-blue-800 underline"
+                          >
+                            Hide
+                          </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                          <!-- X12 Content (Left) -->
+                          <div class="flex flex-col">
+                            <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">Original X12 File:</h6>
+                            <pre class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1" style="color: black !important;"><%= job.x12_content || "X12 content not available" %></pre>
+                          </div>
+                          <!-- JSON Output (Right) -->
+                          <div class="flex flex-col">
+                            <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">Converted JSON:</h6>
+                            <pre class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1" style="color: black !important;"><%= job.json_result %></pre>
+                          </div>
+                        </div>
+                      </div>
+                    <% end %>
                   <% end %>
                 </div>
               </div>
@@ -606,6 +783,60 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     """
   end
 
+  # === ZIP FILE HANDLING ===
+
+  defp extract_uploaded_files(socket) do
+    consume_uploaded_entries(socket, :batch_files, fn %{path: path}, entry ->
+      if is_zip_file?(entry.client_name) do
+        # Extract files from ZIP
+        extract_zip_file(path)
+      else
+        # Regular file - just read it
+        {:ok, content} = File.read(path)
+        [{entry.client_name, content, entry.client_size}]
+      end
+    end)
+    |> List.flatten()
+  end
+
+  defp is_zip_file?(filename) do
+    String.ends_with?(String.downcase(filename), ".zip")
+  end
+
+  defp extract_zip_file(zip_path) do
+    # Create a temporary directory for extraction
+    temp_dir = Path.join(System.tmp_dir!(), "x12_zip_#{:rand.uniform(999999)}")
+    File.mkdir_p!(temp_dir)
+
+    try do
+      # Extract ZIP file
+      case :zip.unzip(String.to_charlist(zip_path), cwd: String.to_charlist(temp_dir)) do
+        {:ok, extracted_files} ->
+          # Read all extracted files
+          extracted_files
+          |> Enum.map(&to_string/1)
+          |> Enum.filter(fn file ->
+            # Only process X12/EDI files, skip directories and other files
+            !File.dir?(file) && Regex.match?(~r/\.(x12|edi|txt)$/i, file)
+          end)
+          |> Enum.map(fn file ->
+            {:ok, content} = File.read(file)
+            filename = Path.basename(file)
+            file_size = byte_size(content)
+            {filename, content, file_size}
+          end)
+
+        {:error, reason} ->
+          # If ZIP extraction fails, return empty list
+          IO.puts("Failed to extract ZIP: #{inspect(reason)}")
+          []
+      end
+    after
+      # Clean up temporary directory
+      File.rm_rf(temp_dir)
+    end
+  end
+
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1024 / 1024, 1)} MB"
@@ -615,4 +846,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   defp status_class("processing"), do: "bg-blue-100 text-blue-800"
   defp status_class("pending"), do: "bg-gray-100 text-gray-800"
   defp status_class(_), do: "bg-gray-100 text-gray-800"
+
+  defp extract_filename(url) do
+    url
+    |> URI.parse()
+    |> Map.get(:path, "")
+    |> Path.basename()
+  end
+
+  defp format_remote_error(:invalid_url), do: "Invalid URL. Please enter a valid HTTP or HTTPS URL."
+  defp format_remote_error(:download_failed), do: "Failed to download file. Please check the URL and try again."
+  defp format_remote_error({:http_error, 404}), do: "File not found (404). Please verify the URL."
+  defp format_remote_error({:http_error, 500}), do: "Server error (500). Please try again later."
+  defp format_remote_error({:http_error, status}), do: "HTTP error (#{status}). Please try again."
+  defp format_remote_error(:timeout), do: "Download timed out. The file may be too large or the server is slow."
+  defp format_remote_error(:invalid_zip), do: "Invalid ZIP file. Please ensure the file is a valid ZIP archive."
+  defp format_remote_error(:no_x12_files), do: "No X12 files found in ZIP. Expected .x12, .edi, or .txt files."
+  defp format_remote_error(:file_too_large), do: "File exceeds maximum size of 100MB."
+  defp format_remote_error(_), do: "An error occurred while processing the remote file."
 end

@@ -11,12 +11,16 @@ defmodule X12Bridge.Conversions do
   ## Batch functions
 
   @doc """
-  Creates a new batch.
+  Creates a new batch and triggers automatic cleanup of old batches.
   """
   def create_batch(attrs \\ %{}) do
-    %Batch{}
-    |> Batch.changeset(attrs)
-    |> Repo.insert()
+    with {:ok, batch} <- %Batch{}
+                         |> Batch.changeset(attrs)
+                         |> Repo.insert() do
+      # Automatically cleanup old batches after creating a new one
+      cleanup_old_batches()
+      {:ok, batch}
+    end
   end
 
   @doc """
@@ -48,6 +52,56 @@ defmodule X12Bridge.Conversions do
     batch
     |> Batch.changeset(attrs)
     |> Repo.update()
+  end
+
+  @doc """
+  Deletes a batch and all its associated jobs (cascade).
+  """
+  def delete_batch(%Batch{} = batch) do
+    Repo.delete(batch)
+  end
+
+  @doc """
+  Deletes all batches and their associated jobs.
+  Useful for clearing test data in development.
+  """
+  def delete_all_batches do
+    {count, _} = Repo.delete_all(Batch)
+    {:ok, count}
+  end
+
+  @doc """
+  Cleans up old batches, keeping only the most recent N batches.
+  The limit is configurable via application config.
+
+  ## Options
+    * `:keep` - Number of most recent batches to keep (default: from config or 50)
+
+  ## Examples
+
+      cleanup_old_batches()  # Uses config value
+      cleanup_old_batches(keep: 100)  # Keep 100 most recent
+  """
+  def cleanup_old_batches(opts \\ []) do
+    max_batches = Keyword.get(opts, :keep) ||
+                  Application.get_env(:x12_bridge, :batch_retention)[:max_batches] ||
+                  50
+
+    # Get IDs of batches to keep (most recent N)
+    batch_ids_to_keep =
+      Batch
+      |> order_by([b], desc: b.inserted_at)
+      |> limit(^max_batches)
+      |> select([b], b.id)
+      |> Repo.all()
+
+    # Delete batches not in the keep list
+    {count, _} =
+      Batch
+      |> where([b], b.id not in ^batch_ids_to_keep)
+      |> Repo.delete_all()
+
+    {:ok, count}
   end
 
   ## Job functions
@@ -128,8 +182,8 @@ defmodule X12Bridge.Conversions do
       # Process the file
       {:ok, result} = process_file_sync(file_content, job.original_filename)
 
-      # Update job with results
-      update_job(job, Map.put(result, :progress, 100))
+      # Update job with results including original X12 content
+      update_job(job, result |> Map.put(:progress, 100) |> Map.put(:x12_content, file_content))
 
       # Broadcast progress update
       Phoenix.PubSub.broadcast(

@@ -10,6 +10,7 @@ defmodule X12Bridge.Conversions.Job do
     field :file_size, :integer
     field :status, :string, default: "pending"
     field :json_result, :string
+    field :x12_content, :string
     field :error_message, :string
     field :processing_time_ms, :integer
     field :progress, :integer, default: 0
@@ -22,7 +23,7 @@ defmodule X12Bridge.Conversions.Job do
   @doc false
   def changeset(job, attrs) do
     job
-    |> cast(attrs, [:batch_id, :original_filename, :file_size, :status, :json_result, :error_message, :processing_time_ms, :progress])
+    |> cast(attrs, [:batch_id, :original_filename, :file_size, :status, :json_result, :x12_content, :error_message, :processing_time_ms, :progress])
     |> validate_required([:original_filename])
     |> validate_inclusion(:status, ["pending", "processing", "completed", "failed"])
   end

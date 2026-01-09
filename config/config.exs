@@ -58,6 +58,16 @@ config :mime, :types, %{
   "text/plain" => ["txt"]
 }
 
+# Configure batch retention policy
+config :x12_bridge, :batch_retention,
+  max_batches: 50  # Keep only the 50 most recent batches in development
+
+# Configure remote batch fetcher
+config :x12_bridge, :remote_fetcher,
+  download_timeout_ms: 60_000,
+  max_file_size_bytes: 100_000_000,
+  allowed_extensions: [".x12", ".edi", ".txt"]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

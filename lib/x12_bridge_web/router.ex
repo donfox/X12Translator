@@ -19,9 +19,7 @@ defmodule X12BridgeWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
-    live "/converter", ConverterLive
-    live "/batch", BatchLive
-    live "/batch/enhanced", BatchLiveEnhanced
+    live "/converter", BatchLiveEnhanced
   end
 
   # Other scopes may use custom stacks.

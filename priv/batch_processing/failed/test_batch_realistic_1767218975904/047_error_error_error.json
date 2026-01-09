@@ -1,6 +1,0 @@
-{
-  "error": "\"File too short to contain valid ISA segment\"",
-  "timestamp": "2025-12-31T22:09:35.931477Z",
-  "filename": "047_error_error.x12",
-  "original_path": "priv/test_data/batches/batch_realistic/047_error_error.x12"
-}

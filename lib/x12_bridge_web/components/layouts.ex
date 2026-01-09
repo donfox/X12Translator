@@ -19,12 +19,13 @@ defmodule X12BridgeWeb.Layouts do
 
   ## Examples
 
-      <Layouts.app_layout flash={@flash}>
+      <Layouts.app_layout flash={@flash} current_path={@current_path}>
         <h1>Content</h1>
       </Layouts.app_layout>
 
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
+  attr :current_path, :string, default: "/", doc: "the current request path"
 
   attr :current_scope, :map,
     default: nil,
@@ -33,6 +34,7 @@ defmodule X12BridgeWeb.Layouts do
   slot :inner_block, required: true
 
   def app_layout(assigns) do
+
     ~H"""
     <header class="navbar px-4 sm:px-6 lg:px-8">
       <div class="flex-1">
@@ -44,13 +46,10 @@ defmodule X12BridgeWeb.Layouts do
       <div class="flex-none">
         <ul class="flex flex-column px-1 space-x-4 items-center">
           <li>
-            <a href="/" class="btn btn-ghost">Home</a>
+            <a href="/" class={nav_button_class(@current_path, "/")}>Home</a>
           </li>
           <li>
-            <a href="/converter" class="btn btn-ghost">Single File</a>
-          </li>
-          <li>
-            <a href="/batch" class="btn btn-primary">Batch Processing</a>
+            <a href="/converter" class={nav_button_class(@current_path, "/converter")}>Converter</a>
           </li>
           <li>
             <.theme_toggle />
@@ -65,6 +64,14 @@ defmodule X12BridgeWeb.Layouts do
 
     <.flash_group flash={@flash} />
     """
+  end
+
+  defp nav_button_class(current_path, link_path) do
+    if current_path == link_path do
+      "btn btn-primary"
+    else
+      "btn btn-ghost"
+    end
   end
 
   @doc """

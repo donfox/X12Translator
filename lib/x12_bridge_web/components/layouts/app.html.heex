@@ -1,3 +1,3 @@
-<.app_layout flash={@flash}>
+<.app_layout flash={@flash} current_path={@conn.request_path}>
   <%= @inner_content %>
 </.app_layout>

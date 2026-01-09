@@ -1,6 +1,0 @@
-{
-  "error": "\"File too short to contain valid ISA segment\"",
-  "timestamp": "2025-12-31T22:25:14.439392Z",
-  "filename": "480_error_error.x12",
-  "original_path": "priv/test_data/batches/batch_performance/480_error_error.x12"
-}

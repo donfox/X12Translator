@@ -97,13 +97,13 @@ defmodule X12Bridge.BatchProcessor do
 
   ## Example
 
-      BatchProcessor.process_test_batch("batch_quick")
+      BatchProcessor.process_test_batch("automated_test_data")
   """
   def process_test_batch(batch_name, opts \\ []) do
     config = get_config(opts)
     batch_id = "test_#{batch_name}_#{:os.system_time(:millisecond)}"
 
-    test_batch_dir = Path.join("priv/test_data/batches", batch_name)
+    test_batch_dir = Path.join("test/fixtures/x12", batch_name)
 
     with true <- File.exists?(test_batch_dir),
          {:ok, files} <- scan_directory(test_batch_dir, "*.x12"),

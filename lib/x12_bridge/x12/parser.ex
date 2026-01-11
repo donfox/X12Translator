@@ -230,17 +230,60 @@ defmodule X12Bridge.X12.Parser do
           end
 
         seg_id when seg_id in ["SV1", "SV2", "SV3"] ->
-          # Add to current service line (SV1 for professional, SV2 for institutional, SV3 for dental)
-          if acc.current_claim && length(acc.current_claim.service_lines) > 0 do
-            [current_line | other_lines] = acc.current_claim.service_lines
+          # SV1/SV2/SV3 segments for service lines
+          # Each SV segment starts a NEW service line
+          if acc.current_claim do
+            # Check if current line already has an SV segment
+            has_sv_in_current_line =
+              if length(acc.current_claim.service_lines) > 0 do
+                [current_line | _] = acc.current_claim.service_lines
+                Enum.any?(current_line.line_segments, fn seg ->
+                  seg.id in ["SV1", "SV2", "SV3"]
+                end)
+              else
+                false
+              end
 
-            updated_line =
-              Map.update!(current_line, :line_segments, fn segs -> [segment | segs] end)
+            if has_sv_in_current_line do
+              # Current line already has an SV segment, start a new line
+              new_service_line = %{
+                line_segment: nil,  # No LX segment for implicit lines
+                line_segments: [segment]
+              }
 
-            current_claim =
-              Map.put(acc.current_claim, :service_lines, [updated_line | other_lines])
+              current_claim =
+                Map.update!(acc.current_claim, :service_lines, fn lines ->
+                  [new_service_line | lines]
+                end)
 
-            %{acc | current_claim: current_claim}
+              %{acc | current_claim: current_claim}
+            else
+              # Add to existing service line OR create new one if none exist
+              if length(acc.current_claim.service_lines) > 0 do
+                [current_line | other_lines] = acc.current_claim.service_lines
+
+                updated_line =
+                  Map.update!(current_line, :line_segments, fn segs -> [segment | segs] end)
+
+                current_claim =
+                  Map.put(acc.current_claim, :service_lines, [updated_line | other_lines])
+
+                %{acc | current_claim: current_claim}
+              else
+                # Create first service line (implicit for 837I)
+                new_service_line = %{
+                  line_segment: nil,
+                  line_segments: [segment]
+                }
+
+                current_claim =
+                  Map.update!(acc.current_claim, :service_lines, fn lines ->
+                    [new_service_line | lines]
+                  end)
+
+                %{acc | current_claim: current_claim}
+              end
+            end
           else
             acc
           end

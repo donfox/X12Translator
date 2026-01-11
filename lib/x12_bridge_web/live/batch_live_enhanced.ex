@@ -35,6 +35,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:remote_url, "")
      |> assign(:remote_status, nil)  # nil, :processing, :completed, :error
      |> assign(:remote_result, nil)
+     |> assign(:processing_status, nil)  # NEW: Track active processing
      |> allow_upload(:batch_files,
          accept: [".x12", ".edi", ".txt", ".zip"],
          max_entries: 50,
@@ -197,6 +198,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   end
 
   @impl true
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :batch_files, ref)}
+  end
+
+  @impl true
   def handle_event("process_batch", _params, socket) do
     entries = socket.assigns.uploads.batch_files.entries
 
@@ -236,6 +242,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
        socket
        |> assign(:batches, batches)
        |> assign(:current_batch, batch)
+       |> assign(:processing_status, :active)  # Mark as actively processing
        |> put_flash(:info, "Processing #{batch.total_files} files...")}
     end
   end
@@ -248,7 +255,15 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_event("close_batch", _params, socket) do
-    {:noreply, assign(socket, :current_batch, nil)}
+    {:noreply,
+     socket
+     |> assign(:current_batch, nil)
+     |> assign(:processing_status, nil)}  # Clear processing status when closing batch
+  end
+
+  @impl true
+  def handle_event("dismiss_processing", _params, socket) do
+    {:noreply, assign(socket, :processing_status, nil)}
   end
 
   @impl true
@@ -294,6 +309,45 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     end
   end
 
+  @impl true
+  def handle_event("download_batch_zip", %{"id" => batch_id}, socket) do
+    batch = Conversions.get_batch!(batch_id)
+
+    # Get all completed jobs with JSON results
+    completed_jobs =
+      batch.jobs
+      |> Enum.filter(fn job -> job.status == "completed" && job.json_result end)
+
+    if length(completed_jobs) == 0 do
+      {:noreply, put_flash(socket, :error, "No completed conversions to download")}
+    else
+      # Create list of files for ZIP archive
+      # Format: [{filename, content}, ...]
+      files =
+        Enum.map(completed_jobs, fn job ->
+          json_filename = String.replace(job.original_filename, ~r/\.(x12|edi|txt)$/i, ".json")
+          {String.to_charlist(json_filename), job.json_result}
+        end)
+
+      # Create ZIP in memory
+      case :zip.create("batch_results.zip", files, [:memory]) do
+        {:ok, {"batch_results.zip", zip_binary}} ->
+          # Convert binary to base64 for download
+          zip_base64 = Base.encode64(zip_binary)
+
+          {:noreply,
+           socket
+           |> push_event("download_zip", %{
+             filename: "#{sanitize_batch_name(batch.name)}.zip",
+             content: zip_base64
+           })}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to create ZIP: #{inspect(reason)}")}
+      end
+    end
+  end
+
   # === PUBSUB HANDLERS ===
 
   @impl true
@@ -321,6 +375,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      socket
      |> assign(:batches, batches)
      |> assign(:current_batch, batch)
+     |> assign(:processing_status, :completed)  # Mark as completed
      |> put_flash(:info, "Batch completed! #{batch.completed_files} successful, #{batch.failed_files} failed")}
   end
 
@@ -402,6 +457,84 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           </div>
         </div>
 
+        <!-- PROCESSING STATUS INDICATOR -->
+        <%= if @processing_status == :active && @current_batch do %>
+          <div class="mb-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-lg font-bold text-blue-900">🔄 Processing Files...</h3>
+              <button
+                phx-click="dismiss_processing"
+                class="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                title="Dismiss (processing continues in background)"
+              >
+                Dismiss
+              </button>
+            </div>
+            <div class="flex items-center gap-4">
+              <svg class="animate-spin h-8 w-8 text-blue-600 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <div class="flex-1">
+                <p class="text-sm text-blue-700 font-medium">
+                  <%= @current_batch.completed_files + @current_batch.failed_files %> of <%= @current_batch.total_files %> files processed
+                </p>
+                <% completed = @current_batch.completed_files %>
+                <% failed = @current_batch.failed_files %>
+                <%= if completed > 0 || failed > 0 do %>
+                  <p class="text-xs text-blue-600 mt-1">
+                    <span class="text-green-600 font-medium"><%= completed %> successful</span>
+                    <%= if failed > 0 do %>
+                      · <span class="text-red-600 font-medium"><%= failed %> failed</span>
+                    <% end %>
+                  </p>
+                <% end %>
+                <div class="mt-3 bg-blue-200 rounded-full h-3">
+                  <div
+                    class="bg-blue-600 h-3 rounded-full transition-all duration-500"
+                    style={"width: #{Batch.progress_percentage(@current_batch)}%"}
+                  >
+                  </div>
+                </div>
+              </div>
+              <div class="text-right flex-shrink-0">
+                <div class="text-3xl font-bold text-blue-900">
+                  <%= Batch.progress_percentage(@current_batch) %>%
+                </div>
+                <div class="text-xs text-blue-600">Complete</div>
+              </div>
+            </div>
+            <div class="mt-3 text-xs text-blue-600">
+              💡 Tip: Files are processed with 30-second timeout protection. The app will never freeze.
+            </div>
+          </div>
+        <% end %>
+
+        <!-- PROCESSING COMPLETED INDICATOR -->
+        <%= if @processing_status == :completed && @current_batch do %>
+          <div class="mb-6 bg-green-50 border-2 border-green-200 rounded-lg p-6">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-4">
+                <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <h3 class="text-lg font-bold text-green-900">✅ Processing Complete!</h3>
+                  <p class="text-sm text-green-700">
+                    <%= @current_batch.completed_files %> successful · <%= @current_batch.failed_files %> failed · <%= @current_batch.total_files %> total
+                  </p>
+                </div>
+              </div>
+              <button
+                phx-click="dismiss_processing"
+                class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        <% end %>
+
         <!-- WEB UPLOAD MODE -->
         <%= if @processing_mode == :upload do %>
           <div class="mb-8 bg-white shadow rounded-lg p-6">
@@ -431,9 +564,44 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                     </p>
                   </label>
 
-                  <div :for={entry <- @uploads.batch_files.entries} class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg flex justify-between items-center">
-                    <span class="text-base font-semibold text-gray-900"><%= entry.client_name %></span>
-                    <span class="text-sm text-gray-600"><%= format_bytes(entry.client_size) %></span>
+                  <div :for={entry <- @uploads.batch_files.entries} class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div class="flex justify-between items-center">
+                      <div class="flex-1">
+                        <span class="text-base font-semibold text-gray-900"><%= entry.client_name %></span>
+                        <span class="text-sm text-gray-600 ml-3"><%= format_bytes(entry.client_size) %></span>
+                      </div>
+                      <button
+                        type="button"
+                        phx-click="cancel_upload"
+                        phx-value-ref={entry.ref}
+                        class="ml-4 px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors flex items-center gap-1"
+                        title="Remove this file"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        Remove
+                      </button>
+                    </div>
+
+                    <!-- Upload progress bar (if uploading) -->
+                    <%= if entry.progress > 0 && entry.progress < 100 do %>
+                      <div class="mt-2 bg-green-200 rounded-full h-2">
+                        <div
+                          class="bg-green-600 h-2 rounded-full transition-all duration-300"
+                          style={"width: #{entry.progress}%"}
+                        >
+                        </div>
+                      </div>
+                      <p class="text-xs text-green-600 mt-1">Uploading... <%= entry.progress %>%</p>
+                    <% end %>
+
+                    <!-- Error display -->
+                    <%= for err <- upload_errors(@uploads.batch_files, entry) do %>
+                      <p class="mt-2 text-sm text-red-600">
+                        ⚠️ <%= error_to_string(err) %>
+                      </p>
+                    <% end %>
                   </div>
                 </div>
 
@@ -488,13 +656,28 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                           </div>
                           <div class="text-xs text-gray-500">Success / Failed / Total</div>
                         </div>
-                        <button
-                          phx-click="view_batch"
-                          phx-value-id={batch.id}
-                          class="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                        >
-                          View
-                        </button>
+                        <div class="flex gap-2">
+                          <%= if batch.completed_files > 0 do %>
+                            <button
+                              phx-click="download_batch_zip"
+                              phx-value-id={batch.id}
+                              class="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1"
+                              title="Download all successful conversions as ZIP"
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              ZIP
+                            </button>
+                          <% end %>
+                          <button
+                            phx-click="view_batch"
+                            phx-value-id={batch.id}
+                            class="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                          >
+                            View
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -662,13 +845,28 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                             </div>
                             <div class="text-xs text-gray-500">Success / Failed / Total</div>
                           </div>
-                          <button
-                            phx-click="view_batch"
-                            phx-value-id={batch.id}
-                            class="px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
-                          >
-                            View
-                          </button>
+                          <div class="flex gap-2">
+                            <%= if batch.completed_files > 0 do %>
+                              <button
+                                phx-click="download_batch_zip"
+                                phx-value-id={batch.id}
+                                class="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1"
+                                title="Download all successful conversions as ZIP"
+                              >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                ZIP
+                              </button>
+                            <% end %>
+                            <button
+                              phx-click="view_batch"
+                              phx-value-id={batch.id}
+                              class="px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+                            >
+                              View
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -841,6 +1039,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   defp format_bytes(bytes) when bytes < 1024 * 1024, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1024 / 1024, 1)} MB"
 
+  defp sanitize_batch_name(name) do
+    # Remove special characters and spaces, replace with underscores
+    name
+    |> String.replace(~r/[^a-zA-Z0-9\-_]/, "_")
+    |> String.slice(0..50)  # Limit length
+  end
+
   defp status_class("completed"), do: "bg-green-100 text-green-800"
   defp status_class("failed"), do: "bg-red-100 text-red-800"
   defp status_class("processing"), do: "bg-blue-100 text-blue-800"
@@ -864,4 +1069,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   defp format_remote_error(:no_x12_files), do: "No X12 files found in ZIP. Expected .x12, .edi, or .txt files."
   defp format_remote_error(:file_too_large), do: "File exceeds maximum size of 100MB."
   defp format_remote_error(_), do: "An error occurred while processing the remote file."
+
+  # Convert upload errors to human-readable strings
+  defp error_to_string(:too_large), do: "File is too large (max 10MB)"
+  defp error_to_string(:not_accepted), do: "File type not accepted (use .x12, .edi, .txt, or .zip)"
+  defp error_to_string(:too_many_files), do: "Too many files (max 50)"
+  defp error_to_string(:external_client_failure), do: "Upload failed - please try again"
+  defp error_to_string(error), do: "Upload error: #{inspect(error)}"
 end

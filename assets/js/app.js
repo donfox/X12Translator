@@ -93,6 +93,30 @@ window.addEventListener("phx:download", (e) => {
   }
 })
 
+// Handle ZIP file download (base64 encoded)
+window.addEventListener("phx:download_zip", (e) => {
+  const {filename, content} = e.detail
+  if (filename && content) {
+    // Decode base64 to binary
+    const binaryString = atob(content)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+
+    const blob = new Blob([bytes], {type: "application/zip"})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    console.log("Downloaded ZIP:", filename)
+  }
+})
+
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))

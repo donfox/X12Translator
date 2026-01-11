@@ -124,67 +124,65 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   end
 
   @impl true
-  def handle_event("process_remote_batch", %{"url" => url}, socket) do
-    case RemoteFetcher.validate_url(url) do
-      {:ok, _uri} ->
-        # Spawn background task to fetch and process
-        Task.start(fn ->
-          case RemoteFetcher.fetch_and_extract(url) do
-            {:ok, %{files: file_paths, temp_dir: temp_dir}} ->
-              # Create batch in database
-              {:ok, batch} =
-                Conversions.create_batch(%{
-                  name: "Remote Import - #{extract_filename(url)}",
-                  total_files: length(file_paths)
-                })
+  def handle_event("process_remote_batch", %{"url" => source}, socket) do
+    if String.trim(source) == "" do
+      {:noreply, put_flash(socket, :error, "Please enter a source path or URL")}
+    else
+      # Spawn background task to fetch and process
+      Task.start(fn ->
+        case RemoteFetcher.fetch_and_extract(source) do
+          {:ok, %{files: file_paths, temp_dir: temp_dir}} ->
+            # Create batch in database
+            {:ok, batch} =
+              Conversions.create_batch(%{
+                name: "Remote Import - #{extract_filename(source)}",
+                total_files: length(file_paths)
+              })
 
-              Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
+            Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
 
-              # Create jobs and read file contents
-              files_to_process =
-                Enum.map(file_paths, fn path ->
-                  {:ok, content} = File.read(path)
+            # Create jobs and read file contents
+            files_to_process =
+              Enum.map(file_paths, fn path ->
+                {:ok, content} = File.read(path)
 
-                  {:ok, job} =
-                    Conversions.create_job(%{
-                      batch_id: batch.id,
-                      original_filename: Path.basename(path),
-                      file_size: byte_size(content),
-                      status: "pending"
-                    })
+                {:ok, job} =
+                  Conversions.create_job(%{
+                    batch_id: batch.id,
+                    original_filename: Path.basename(path),
+                    file_size: byte_size(content),
+                    status: "pending"
+                  })
 
-                  {job.id, content}
-                end)
+                {job.id, content}
+              end)
 
-              # Process using existing pipeline
-              Conversions.process_batch_sync(batch.id, files_to_process)
+            # Process using existing pipeline
+            Conversions.process_batch_sync(batch.id, files_to_process)
 
-              # Cleanup temporary files
-              RemoteFetcher.cleanup_temp_files(temp_dir)
+            # Cleanup temporary files
+            RemoteFetcher.cleanup_temp_files(temp_dir)
 
-              # Broadcast completion
-              Phoenix.PubSub.broadcast(
-                X12Bridge.PubSub,
-                "batches",
-                {:remote_import_completed, {:ok, batch}}
-              )
+            # Broadcast completion
+            Phoenix.PubSub.broadcast(
+              X12Bridge.PubSub,
+              "batches",
+              {:remote_import_completed, {:ok, batch}}
+            )
 
-            {:error, reason} ->
-              Phoenix.PubSub.broadcast(
-                X12Bridge.PubSub,
-                "batches",
-                {:remote_import_completed, {:error, reason}}
-              )
-          end
-        end)
+          {:error, reason} ->
+            Phoenix.PubSub.broadcast(
+              X12Bridge.PubSub,
+              "batches",
+              {:remote_import_completed, {:error, reason}}
+            )
+        end
+      end)
 
-        {:noreply,
-         socket
-         |> assign(:remote_status, :processing)
-         |> put_flash(:info, "Downloading and processing remote batch...")}
-
-      {:error, :invalid_url} ->
-        {:noreply, put_flash(socket, :error, "Invalid URL. Please enter a valid HTTP or HTTPS URL.")}
+      {:noreply,
+       socket
+       |> assign(:remote_status, :processing)
+       |> put_flash(:info, "Fetching and processing batch...")}
     end
   end
 
@@ -707,13 +705,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           <div class="mb-8 bg-white shadow rounded-lg p-6">
             <h2 class="text-xl font-semibold text-gray-900 mb-4">Remote Batch Import</h2>
             <p class="text-sm text-gray-600 mb-6">
-              Fetch and process X12 files from a remote ZIP archive via HTTP/HTTPS
+              Fetch and process X12 files from multiple sources
             </p>
 
             <form phx-submit="process_remote_batch" class="space-y-4">
               <div>
                 <label for="remote-url" class="block text-sm font-medium text-gray-700 mb-2">
-                  Remote ZIP URL
+                  ZIP File Source
                 </label>
                 <input
                   type="text"
@@ -721,11 +719,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   name="url"
                   value={@remote_url}
                   phx-keyup="update_remote_url"
-                  placeholder="https://example.com/batch.zip or file path"
+                  placeholder="https://example.com/batch.zip or /path/to/batch.zip or /mnt/data/x12/batch.zip"
                   class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
                 />
                 <p class="mt-2 text-xs text-gray-500">
-                  Enter the URL of a ZIP file containing X12 files (.x12, .edi, or .txt)
+                  Supports: HTTP/HTTPS URLs • Local file paths • Databricks paths (/mnt/...)
                 </p>
               </div>
 
@@ -1065,7 +1063,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     |> Path.basename()
   end
 
-  defp format_remote_error(:invalid_url), do: "Invalid URL. Please enter a valid HTTP or HTTPS URL."
+  defp format_remote_error(:invalid_url), do: "Invalid source. Please enter a valid HTTP/HTTPS URL, local file path, or Databricks path."
+  defp format_remote_error(:invalid_path), do: "File not found. Please check the file path and try again."
   defp format_remote_error(:download_failed), do: "Failed to download file. Please check the URL and try again."
   defp format_remote_error({:http_error, 404}), do: "File not found (404). Please verify the URL."
   defp format_remote_error({:http_error, 500}), do: "Server error (500). Please try again later."
@@ -1074,7 +1073,10 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   defp format_remote_error(:invalid_zip), do: "Invalid ZIP file. Please ensure the file is a valid ZIP archive."
   defp format_remote_error(:no_x12_files), do: "No X12 files found in ZIP. Expected .x12, .edi, or .txt files."
   defp format_remote_error(:file_too_large), do: "File exceeds maximum size of 100MB."
-  defp format_remote_error(_), do: "An error occurred while processing the remote file."
+  defp format_remote_error(:databricks_not_configured), do: "Databricks is not configured. Please set DATABRICKS_HOST and DATABRICKS_TOKEN environment variables."
+  defp format_remote_error({:databricks_error, status}), do: "Databricks API error (#{status}). Please check your credentials and path."
+  defp format_remote_error(:invalid_databricks_response), do: "Invalid response from Databricks API. Please check the file path."
+  defp format_remote_error(_), do: "An error occurred while processing the file."
 
   # Convert upload errors to human-readable strings
   defp error_to_string(:too_large), do: "File is too large (max 10MB)"

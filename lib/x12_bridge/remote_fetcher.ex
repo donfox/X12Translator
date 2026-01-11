@@ -18,7 +18,12 @@ defmodule X12Bridge.RemoteFetcher do
   require Logger
 
   @doc """
-  Fetches a remote ZIP archive and extracts X12 files.
+  Fetches a ZIP archive from various sources and extracts X12 files.
+
+  Supports:
+    * HTTP/HTTPS URLs (e.g., "https://example.com/batch.zip")
+    * Local file paths (e.g., "/path/to/batch.zip")
+    * Databricks paths (e.g., "/mnt/data/x12/batch.zip") - requires Databricks config
 
   ## Options
 
@@ -34,14 +39,74 @@ defmodule X12Bridge.RemoteFetcher do
 
     * `{:error, reason}` where reason is:
       * `:invalid_url` - URL format invalid or non-HTTP(S)
+      * `:invalid_path` - Local file path does not exist
       * `:download_failed` - Network error or timeout
       * `{:http_error, status_code}` - Non-200 HTTP response
       * `:invalid_zip` - Not a valid ZIP file
       * `:no_x12_files` - ZIP contains no X12 files
       * `:file_too_large` - File exceeds max_size limit
+      * `:databricks_not_configured` - Databricks API credentials not configured
 
   """
-  def fetch_and_extract(url, opts \\ []) do
+  def fetch_and_extract(source, opts \\ []) do
+    case detect_source_type(source) do
+      :http_url ->
+        fetch_from_http(source, opts)
+
+      :local_file ->
+        fetch_from_local(source, opts)
+
+      :databricks_path ->
+        fetch_from_databricks(source, opts)
+
+      :invalid ->
+        {:error, :invalid_url}
+    end
+  end
+
+  @doc """
+  Detects the type of source path provided.
+
+  ## Examples
+
+      iex> X12Bridge.RemoteFetcher.detect_source_type("https://example.com/file.zip")
+      :http_url
+
+      iex> X12Bridge.RemoteFetcher.detect_source_type("/Users/name/file.zip")
+      :local_file
+
+      iex> X12Bridge.RemoteFetcher.detect_source_type("/mnt/data/x12/file.zip")
+      :databricks_path
+
+  """
+  def detect_source_type(source) when is_binary(source) do
+    cond do
+      # HTTP/HTTPS URL
+      String.starts_with?(source, "http://") or String.starts_with?(source, "https://") ->
+        :http_url
+
+      # Databricks mount path
+      String.starts_with?(source, "/mnt/") or String.starts_with?(source, "dbfs:/") ->
+        :databricks_path
+
+      # Local file path (absolute) - Unix or Windows
+      String.starts_with?(source, "/") or String.match?(source, ~r/^[A-Za-z]:[\\\/]/) ->
+        :local_file
+
+      # Local file path (relative) - if it contains path separators and looks like a file
+      String.contains?(source, "/") or String.contains?(source, "\\") ->
+        :local_file
+
+      # Invalid (single words, empty strings, etc.)
+      true ->
+        :invalid
+    end
+  end
+
+  def detect_source_type(_), do: :invalid
+
+  # Fetch from HTTP/HTTPS URL
+  defp fetch_from_http(url, opts) do
     with {:ok, _uri} <- validate_url(url),
          {:ok, config} <- get_config(opts),
          {:ok, zip_data} <- download_file(url, config.timeout, config.max_size),
@@ -57,6 +122,140 @@ defmodule X12Bridge.RemoteFetcher do
        }}
     else
       {:error, _reason} = error -> error
+    end
+  end
+
+  # Fetch from local file system
+  defp fetch_from_local(file_path, opts) do
+    Logger.info("Reading local file: #{file_path}")
+
+    with {:ok, config} <- get_config(opts),
+         {:ok, _} <- validate_local_file(file_path, config.max_size),
+         {:ok, zip_data} <- File.read(file_path),
+         {:ok, temp_dir} <- create_temp_directory(),
+         {:ok, extracted_files} <- extract_zip(zip_data, temp_dir),
+         {:ok, x12_files} <- validate_zip_contents(extracted_files, config.allowed_extensions),
+         {:ok, manifest} <- load_manifest(temp_dir) do
+      {:ok,
+       %{
+         files: x12_files,
+         manifest: manifest,
+         temp_dir: temp_dir
+       }}
+    else
+      {:error, :enoent} ->
+        Logger.error("Local file not found: #{file_path}")
+        {:error, :invalid_path}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Fetch from Databricks (placeholder - requires API integration)
+  defp fetch_from_databricks(databricks_path, opts) do
+    Logger.info("Attempting to fetch from Databricks: #{databricks_path}")
+
+    # Check if Databricks credentials are configured
+    databricks_config = Application.get_env(:x12_bridge, :databricks, [])
+    host = Keyword.get(databricks_config, :host)
+    token = Keyword.get(databricks_config, :token)
+
+    cond do
+      is_nil(host) or is_nil(token) ->
+        Logger.error("""
+        Databricks not configured. Please set in config/runtime.exs:
+
+        config :x12_bridge, :databricks,
+          host: System.get_env("DATABRICKS_HOST"),
+          token: System.get_env("DATABRICKS_TOKEN")
+        """)
+
+        {:error, :databricks_not_configured}
+
+      true ->
+        fetch_from_databricks_api(databricks_path, host, token, opts)
+    end
+  end
+
+  defp fetch_from_databricks_api(databricks_path, host, token, opts) do
+    # Convert /mnt/ path to DBFS path
+    dbfs_path =
+      if String.starts_with?(databricks_path, "/mnt/") do
+        String.replace_prefix(databricks_path, "/mnt/", "/dbfs/mnt/")
+      else
+        databricks_path
+      end
+
+    # Use Databricks REST API to read file
+    url = "https://#{host}/api/2.0/dbfs/read?path=#{URI.encode(dbfs_path)}"
+
+    Logger.info("Fetching from Databricks API: #{url}")
+
+    :inets.start()
+    :ssl.start()
+
+    config = opts[:config] || elem(get_config(opts), 1)
+
+    request = {
+      String.to_charlist(url),
+      [{~c"Authorization", String.to_charlist("Bearer #{token}")}]
+    }
+
+    http_options = [
+      timeout: config.timeout,
+      ssl: [verify: :verify_none]
+    ]
+
+    case :httpc.request(:get, request, http_options, body_format: :binary) do
+      {:ok, {{_version, 200, _status}, _headers, body}} ->
+        # Databricks API returns base64-encoded data
+        case Jason.decode(body) do
+          {:ok, %{"data" => base64_data}} ->
+            zip_data = Base.decode64!(base64_data)
+            Logger.info("Downloaded #{byte_size(zip_data)} bytes from Databricks")
+
+            # Process the ZIP file
+            with {:ok, temp_dir} <- create_temp_directory(),
+                 {:ok, extracted_files} <- extract_zip(zip_data, temp_dir),
+                 {:ok, x12_files} <-
+                   validate_zip_contents(extracted_files, config.allowed_extensions),
+                 {:ok, manifest} <- load_manifest(temp_dir) do
+              {:ok,
+               %{
+                 files: x12_files,
+                 manifest: manifest,
+                 temp_dir: temp_dir
+               }}
+            end
+
+          {:error, _reason} ->
+            {:error, :invalid_databricks_response}
+        end
+
+      {:ok, {{_version, status_code, _status}, _headers, _body}} ->
+        Logger.error("Databricks API error: #{status_code}")
+        {:error, {:databricks_error, status_code}}
+
+      {:error, reason} ->
+        Logger.error("Databricks fetch failed: #{inspect(reason)}")
+        {:error, :download_failed}
+    end
+  end
+
+  defp validate_local_file(file_path, max_size) do
+    cond do
+      not File.exists?(file_path) ->
+        {:error, :invalid_path}
+
+      not File.regular?(file_path) ->
+        {:error, :invalid_path}
+
+      File.stat!(file_path).size > max_size ->
+        {:error, :file_too_large}
+
+      true ->
+        {:ok, :valid}
     end
   end
 

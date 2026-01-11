@@ -103,7 +103,7 @@ defmodule X12Bridge.BatchProcessor do
     config = get_config(opts)
     batch_id = "test_#{batch_name}_#{:os.system_time(:millisecond)}"
 
-    test_batch_dir = Path.join("test/fixtures/x12", batch_name)
+    test_batch_dir = Path.join("test/fixtures", batch_name)
 
     with true <- File.exists?(test_batch_dir),
          {:ok, files} <- scan_directory(test_batch_dir, "*.x12"),

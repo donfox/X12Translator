@@ -3,7 +3,7 @@ defmodule X12Bridge.RemoteFetcherTest do
 
   alias X12Bridge.RemoteFetcher
 
-  @test_data_dir Path.expand("../../test/fixtures/x12/manual_test_data", __DIR__)
+  @test_data_dir Path.expand("../../test/fixtures/manual_test_data", __DIR__)
 
   describe "validate_url/1" do
     test "accepts valid HTTP URL" do
@@ -240,7 +240,7 @@ defmodule X12Bridge.RemoteFetcherTest do
     @tag :manual
     test "can serve test ZIPs via local HTTP server" do
       # This test provides instructions for manual testing
-      # Run: cd test/fixtures/x12/manual_test_data && python3 -m http.server 8000
+      # Run: cd test/fixtures/manual_test_data && python3 -m http.server 8000
       # Then test with: http://localhost:8000/test_batch_3files.zip
 
       IO.puts("""
@@ -248,7 +248,7 @@ defmodule X12Bridge.RemoteFetcherTest do
       === Manual Testing Instructions ===
 
       1. Start HTTP server:
-         cd test/fixtures/x12/manual_test_data
+         cd test/fixtures/manual_test_data
          python3 -m http.server 8000
 
       2. Test URLs (synthetic test data):

@@ -6,7 +6,7 @@ defmodule Mix.Tasks.GenBatchData do
       mix gen_batch_data custom --size 25 --name my_batch
 
   Note: This task is deprecated. For standard testing, use existing fixtures:
-      test/fixtures/x12/automated_test_data/
+      test/fixtures/automated_test_data/
 
   For custom test scenarios, use:
       mix generate_batch custom --size N --name batch_name
@@ -21,7 +21,7 @@ defmodule Mix.Tasks.GenBatchData do
   @single_path "#{@base_path}/automated_test_data"
 
   def run(args) do
-    Mix.shell().info("⚠️  This task is deprecated. For standard testing, use: test/fixtures/x12/automated_test_data/")
+    Mix.shell().info("⚠️  This task is deprecated. For standard testing, use: test/fixtures/automated_test_data/")
     Mix.shell().info("   For custom batches, use: mix generate_batch custom --size N --name batch_name\n")
 
     case args do

@@ -141,8 +141,8 @@ Key Takeaways
    - Batch continues processing on file-level errors
 
 4. Test Data:
-   - Automated test data: test/fixtures/x12/automated_test_data/
-   - Real-world samples: test/fixtures/x12/manual_test_data/
+   - Automated test data: test/fixtures/automated_test_data/
+   - Real-world samples: test/fixtures/manual_test_data/
    - Generate custom batches: mix generate_batch custom --size N --name my_batch
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

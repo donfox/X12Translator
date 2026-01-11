@@ -32,7 +32,7 @@ C:\Users\yourname\Downloads\batch.zip
 D:\data\x12\batch.zip
 
 # Relative paths (from project root)
-test/fixtures/x12/manual_test_data/databricks_sample_2026-01-09.zip
+test/fixtures/manual_test_data/databricks_sample_2026-01-09.zip
 priv/batches/import.zip
 ```
 
@@ -127,7 +127,7 @@ For testing Remote Import with HTTP URLs, you can serve test files locally:
 
 ```bash
 # Navigate to test data directory
-cd test/fixtures/x12/manual_test_data
+cd test/fixtures/manual_test_data
 
 # Start Python HTTP server
 python3 -m http.server 8000

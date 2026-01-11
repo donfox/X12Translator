@@ -56,7 +56,7 @@ defmodule X12Bridge.BatchProcessorTest do
     end
 
     test "processes valid X12 file successfully", %{batch_id: batch_id, config: config} do
-      file_path = "test/fixtures/x12/automated_test_data/001_837p_valid.x12"
+      file_path = "test/fixtures/automated_test_data/001_837p_valid.x12"
 
       result = BatchProcessor.process_single_file(file_path, batch_id, config)
 
@@ -72,7 +72,7 @@ defmodule X12Bridge.BatchProcessorTest do
     end
 
     test "handles malformed X12 file", %{batch_id: batch_id, config: config} do
-      file_path = "test/fixtures/x12/automated_test_data/005_837p_error.x12"
+      file_path = "test/fixtures/automated_test_data/005_837p_error.x12"
 
       result = BatchProcessor.process_single_file(file_path, batch_id, config)
 

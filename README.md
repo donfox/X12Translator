@@ -222,7 +222,7 @@ mix test path/to/test.exs   # Specific file
 iex -S mix phx.server
 
 # Try functions interactively
-iex> content = File.read!("test/fixtures/x12/automated_test_data/001_837p_valid.x12")
+iex> content = File.read!("test/fixtures/automated_test_data/001_837p_valid.x12")
 iex> {:ok, json} = X12Bridge.X12.Converter.convert_content(content)
 ```
 

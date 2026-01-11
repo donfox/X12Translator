@@ -13,7 +13,7 @@ defmodule Mix.Tasks.GenerateBatch do
 
   ## Output Location
 
-  Generates test batches in test/fixtures/x12/[batch_name]/
+  Generates test batches in test/fixtures/[batch_name]/
 
   Note: For standard testing, use the existing automated_test_data/ fixtures.
   This task is useful for generating custom test scenarios.
@@ -37,7 +37,7 @@ defmodule Mix.Tasks.GenerateBatch do
         }
       _ ->
         Mix.shell().info("Usage: mix generate_batch custom --size N --name batch_name [--error_rate 0.1]")
-        Mix.shell().info("\nFor standard testing, use existing fixtures: test/fixtures/x12/automated_test_data/")
+        Mix.shell().info("\nFor standard testing, use existing fixtures: test/fixtures/automated_test_data/")
         System.halt(1)
     end
 
@@ -47,7 +47,7 @@ defmodule Mix.Tasks.GenerateBatch do
 
     generate_batch(batch_name, batch_config)
 
-    Mix.shell().info("✓ Batch generated: test/fixtures/x12/#{batch_name}")
+    Mix.shell().info("✓ Batch generated: test/fixtures/#{batch_name}")
   end
 
   defp generate_batch(batch_name, config) do

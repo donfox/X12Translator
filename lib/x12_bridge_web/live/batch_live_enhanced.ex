@@ -124,7 +124,10 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   end
 
   @impl true
-  def handle_event("process_remote_batch", %{"url" => source}, socket) do
+  def handle_event("process_remote_batch", params, socket) do
+    IO.inspect(params, label: "RECEIVED PARAMS")
+    source = params["url"] || ""
+
     if String.trim(source) == "" do
       {:noreply, put_flash(socket, :error, "Please enter a source path or URL")}
     else
@@ -709,19 +712,27 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </p>
 
             <form phx-submit="process_remote_batch" class="space-y-4">
-              <div>
+              <div phx-update="ignore" id="remote-url-container">
                 <label for="remote-url" class="block text-sm font-medium text-gray-700 mb-2">
                   ZIP File Source
                 </label>
-                <input
-                  type="text"
-                  id="remote-url"
-                  name="url"
-                  value={@remote_url}
-                  phx-keyup="update_remote_url"
-                  placeholder="https://example.com/batch.zip or /path/to/batch.zip or /mnt/data/x12/batch.zip"
-                  class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
-                />
+                <div class="flex gap-2">
+                  <input
+                    type="text"
+                    id="remote-url"
+                    name="url"
+                    placeholder="https://example.com/batch.zip or /path/to/batch.zip or /mnt/data/x12/batch.zip"
+                    class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 bg-white"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    onclick="document.getElementById('remote-url').value = ''"
+                    class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                  >
+                    Clear
+                  </button>
+                </div>
                 <p class="mt-2 text-xs text-gray-500">
                   Supports: HTTP/HTTPS URLs • Local file paths • Databricks paths (/mnt/...)
                 </p>

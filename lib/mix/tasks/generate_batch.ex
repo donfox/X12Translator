@@ -4,42 +4,22 @@ defmodule Mix.Tasks.GenerateBatch do
 
   ## Usage
 
-      # Generate batch_realistic (50 files)
-      mix generate_batch realistic
-
-      # Generate batch_performance (500 files)
-      mix generate_batch performance
-
       # Generate custom batch
       mix generate_batch custom --size 100 --name my_batch
 
   ## Batch Types
 
-  - **realistic**: 50 files (45 valid, 5 errors) - realistic production scenario
-  - **performance**: 500 files (475 valid, 25 errors) - stress test
-  - **mixed_sizes**: 20 files with varying sizes (1KB to 1MB)
   - **custom**: Custom size and configuration
+
+  ## Output Location
+
+  Generates test batches in test/fixtures/x12/[batch_name]/
+
+  Note: For standard testing, use the existing automated_test_data/ fixtures.
+  This task is useful for generating custom test scenarios.
   """
 
   use Mix.Task
-
-  @batch_templates %{
-    realistic: %{
-      size: 50,
-      error_rate: 0.10,
-      description: "Realistic production batch"
-    },
-    performance: %{
-      size: 500,
-      error_rate: 0.05,
-      description: "Performance stress test batch"
-    },
-    mixed_sizes: %{
-      size: 20,
-      error_rate: 0.10,
-      description: "Mixed file sizes batch"
-    }
-  }
 
   @shortdoc "Generate mock X12 batch data"
   def run(args) do
@@ -49,9 +29,6 @@ defmodule Mix.Tasks.GenerateBatch do
     )
 
     batch_config = case batch_type do
-      ["realistic"] -> @batch_templates.realistic
-      ["performance"] -> @batch_templates.performance
-      ["mixed_sizes"] -> @batch_templates.mixed_sizes
       ["custom"] ->
         %{
           size: opts[:size] || 10,
@@ -59,22 +36,22 @@ defmodule Mix.Tasks.GenerateBatch do
           description: "Custom batch"
         }
       _ ->
-        Mix.shell().info("Usage: mix generate_batch [realistic|performance|mixed_sizes|custom]")
-        Mix.shell().info("Options: --size N --error_rate 0.1 --name batch_name")
+        Mix.shell().info("Usage: mix generate_batch custom --size N --name batch_name [--error_rate 0.1]")
+        Mix.shell().info("\nFor standard testing, use existing fixtures: test/fixtures/x12/automated_test_data/")
         System.halt(1)
     end
 
-    batch_name = opts[:name] || "batch_#{List.first(batch_type)}"
+    batch_name = opts[:name] || "custom_batch_#{:os.system_time(:millisecond)}"
 
     Mix.shell().info("Generating #{batch_name} with #{batch_config.size} files (#{batch_config.error_rate * 100}% error rate)...")
 
     generate_batch(batch_name, batch_config)
 
-    Mix.shell().info("✓ Batch generated: priv/test_data/batches/#{batch_name}")
+    Mix.shell().info("✓ Batch generated: test/fixtures/x12/#{batch_name}")
   end
 
   defp generate_batch(batch_name, config) do
-    batch_dir = Path.join("priv/test_data/batches", batch_name)
+    batch_dir = Path.join("test/fixtures/x12", batch_name)
     File.mkdir_p!(batch_dir)
 
     num_errors = round(config.size * config.error_rate)

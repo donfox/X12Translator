@@ -536,9 +536,9 @@ Test end-to-end workflows:
 
 ### Test Data
 
-Located in `priv/test_data/`:
-- **Single files**: `sample_837p.x12`, `sample_837i.x12`, `sample_837d.x12`
-- **Batches**: `batch_quick/`, `batch_realistic/`, `batch_performance/`
+Located in `test/fixtures/x12/`:
+- **Automated tests**: `automated_test_data/` - 6 files for unit testing (001_837p_valid.x12, 002_837i_valid.x12, 003_837d_valid.x12, 004_837p_multi.x12, 005_837p_error.x12, manifest.json)
+- **Manual testing**: `manual_test_data/archives/` - ZIP archives of real X12 data from production sources
 
 ---
 

@@ -3,21 +3,27 @@ defmodule Mix.Tasks.GenBatchData do
   Generates mock batch data for testing batch processing.
 
   Usage:
-      mix gen_batch_data quick        # 5 files
-      mix gen_batch_data realistic    # 25 files
-      mix gen_batch_data performance  # 100 files
-      mix gen_batch_data all          # all batches
+      mix gen_batch_data custom --size 25 --name my_batch
+
+  Note: This task is deprecated. For standard testing, use existing fixtures:
+      test/fixtures/x12/automated_test_data/
+
+  For custom test scenarios, use:
+      mix generate_batch custom --size N --name batch_name
   """
 
   use Mix.Task
 
-  @shortdoc "Generates mock batch data for testing"
+  @shortdoc "Deprecated: Use mix generate_batch instead"
 
-  @base_path "priv/test_data"
-  @single_path "#{@base_path}/single"
-  @batches_path "#{@base_path}/batches"
+  @base_path "test/fixtures/x12"
+  @batches_path @base_path
+  @single_path "#{@base_path}/automated_test_data"
 
   def run(args) do
+    Mix.shell().info("⚠️  This task is deprecated. For standard testing, use: test/fixtures/x12/automated_test_data/")
+    Mix.shell().info("   For custom batches, use: mix generate_batch custom --size N --name batch_name\n")
+
     case args do
       ["quick"] -> generate_quick_batch()
       ["realistic"] -> generate_realistic_batch()

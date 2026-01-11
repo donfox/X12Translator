@@ -35,3 +35,6 @@ x12_bridge-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Batch processing test artifacts
+/priv/batch_processing/
+

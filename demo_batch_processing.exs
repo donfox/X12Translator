@@ -33,14 +33,14 @@ IO.puts "   Output:  priv/batch_processing/output/"
 IO.puts "   Failed:  priv/batch_processing/failed/"
 IO.puts ""
 
-# Demo 1: Quick batch (5 files)
+# Demo 1: Automated test data batch (5 files)
 IO.puts "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-IO.puts "Demo 1: Quick Batch (5 files)"
+IO.puts "Demo 1: Automated Test Data (5 files)"
 IO.puts "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
-IO.puts "Processing batch_quick..."
+IO.puts "Processing automated_test_data..."
 {time_quick, {:ok, result_quick}} = :timer.tc(fn ->
-  BatchProcessor.process_test_batch("batch_quick")
+  BatchProcessor.process_test_batch("automated_test_data")
 end)
 
 IO.puts """
@@ -75,44 +75,18 @@ end
 
 IO.puts "\n"
 
-# Demo 2: Realistic batch (50 files)
+# Demo 2: Concurrency comparison
 IO.puts "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-IO.puts "Demo 2: Realistic Batch (50 files)"
+IO.puts "Demo 2: Concurrency Impact (5 files)"
 IO.puts "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
-IO.puts "Processing batch_realistic with concurrency=10..."
-{time_realistic, {:ok, result_realistic}} = :timer.tc(fn ->
-  BatchProcessor.process_test_batch("batch_realistic", max_concurrency: 10)
-end)
+IO.puts "Testing different concurrency levels:\n"
 
-throughput_realistic = result_realistic.total_files / (time_realistic / 1_000_000)
-
-IO.puts """
-
-✓ Completed in #{Float.round(time_realistic / 1_000_000, 2)}s
-
-Results:
-  Total files:      #{result_realistic.total_files}
-  ✓ Successful:     #{result_realistic.successful_files}
-  ✗ Failed:         #{result_realistic.failed_files}
-  Processing time:  #{result_realistic.processing_time_ms}ms
-  Throughput:       #{Float.round(throughput_realistic, 2)} files/sec
-  Avg per file:     #{Float.round(result_realistic.processing_time_ms / result_realistic.total_files, 2)}ms
-
-"""
-
-# Demo 3: Concurrency comparison
-IO.puts "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-IO.puts "Demo 3: Concurrency Impact (batch_realistic)"
-IO.puts "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-
-IO.puts "Testing different concurrency levels on 50 files:\n"
-
-concurrency_levels = [1, 5, 10]
+concurrency_levels = [1, 2, 5]
 results = Enum.map(concurrency_levels, fn concurrency ->
   IO.write("  Testing concurrency=#{concurrency}... ")
   {time, {:ok, result}} = :timer.tc(fn ->
-    BatchProcessor.process_test_batch("batch_realistic", max_concurrency: concurrency)
+    BatchProcessor.process_test_batch("automated_test_data", max_concurrency: concurrency)
   end)
 
   time_seconds = time / 1_000_000
@@ -159,23 +133,23 @@ Key Takeaways
 2. Concurrent Processing:
    - Elixir's Task.async_stream processes files in parallel
    - #{Enum.at(results, 2) |> elem(0)} concurrent workers = ~#{Float.round(elem(Enum.at(results, 2), 1) / elem(Enum.at(results, 0), 1), 1)}x speedup
-   - Throughput increases significantly with concurrency
+   - Throughput increases with concurrency even on small batches
 
 3. Error Handling:
    - Failed files isolated in failed directory
    - Error reports in JSON format for debugging
    - Batch continues processing on file-level errors
 
-4. Real-World Performance:
-   - 50 files: ~#{Float.round(elem(Enum.at(results, 2), 1), 1)}s with concurrency=10
-   - Estimated 500 files: ~#{Float.round(elem(Enum.at(results, 2), 1) * 10, 1)}s
-   - Scales linearly with file count
+4. Test Data:
+   - Automated test data: test/fixtures/x12/automated_test_data/
+   - Real-world samples: test/fixtures/x12/manual_test_data/
+   - Generate custom batches: mix generate_batch custom --size N --name my_batch
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🎯 Next Steps:
    1. Run tests: mix test test/x12_bridge/batch_processor_test.exs
    2. Try processing your own files in priv/batch_processing/input/
-   3. Generate more test data: mix generate_batch performance
+   3. Generate custom test data: mix generate_batch custom --size 100 --name my_batch
 
 """

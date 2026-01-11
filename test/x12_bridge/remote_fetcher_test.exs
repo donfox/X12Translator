@@ -3,7 +3,7 @@ defmodule X12Bridge.RemoteFetcherTest do
 
   alias X12Bridge.RemoteFetcher
 
-  @test_data_dir Path.expand("../../priv/test_data/remote_batches", __DIR__)
+  @test_data_dir Path.expand("../../test/fixtures/x12/manual_test_data", __DIR__)
 
   describe "validate_url/1" do
     test "accepts valid HTTP URL" do
@@ -240,7 +240,7 @@ defmodule X12Bridge.RemoteFetcherTest do
     @tag :manual
     test "can serve test ZIPs via local HTTP server" do
       # This test provides instructions for manual testing
-      # Run: cd priv/test_data/remote_batches && python3 -m http.server 8000
+      # Run: cd test/fixtures/x12/manual_test_data && python3 -m http.server 8000
       # Then test with: http://localhost:8000/test_batch_3files.zip
 
       IO.puts("""
@@ -248,15 +248,18 @@ defmodule X12Bridge.RemoteFetcherTest do
       === Manual Testing Instructions ===
 
       1. Start HTTP server:
-         cd priv/test_data/remote_batches
+         cd test/fixtures/x12/manual_test_data
          python3 -m http.server 8000
 
-      2. Test URLs:
+      2. Test URLs (synthetic test data):
          http://localhost:8000/test_batch_3files.zip
          http://localhost:8000/test_batch_with_manifest.zip
          http://localhost:8000/test_batch_invalid.zip
 
-      3. Run in IEx:
+      3. Test URL (real Databricks data):
+         http://localhost:8000/databricks_sample_2026-01-09.zip
+
+      4. Run in IEx:
          {:ok, result} = X12Bridge.RemoteFetcher.fetch_and_extract("http://localhost:8000/test_batch_3files.zip")
          X12Bridge.RemoteFetcher.cleanup_temp_files(result.temp_dir)
 

@@ -117,6 +117,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   end
 
   @impl true
+  def handle_event("update_remote_url", params, socket) do
+    # Fallback for any unexpected param format
+    url = params["url"] || params["value"] || ""
+    {:noreply, assign(socket, :remote_url, url)}
+  end
+
+  @impl true
   def handle_event("process_remote_batch", %{"url" => url}, socket) do
     case RemoteFetcher.validate_url(url) do
       {:ok, _uri} ->
@@ -709,14 +716,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   Remote ZIP URL
                 </label>
                 <input
-                  type="url"
+                  type="text"
                   id="remote-url"
                   name="url"
                   value={@remote_url}
-                  phx-change="update_remote_url"
-                  placeholder="https://example.com/batch.zip"
+                  phx-keyup="update_remote_url"
+                  placeholder="https://example.com/batch.zip or file path"
                   class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500"
-                  required
                 />
                 <p class="mt-2 text-xs text-gray-500">
                   Enter the URL of a ZIP file containing X12 files (.x12, .edi, or .txt)

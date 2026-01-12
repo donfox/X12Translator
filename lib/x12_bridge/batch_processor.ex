@@ -1,9 +1,8 @@
 defmodule X12Bridge.BatchProcessor do
   @moduledoc """
-  Batch processor for X12 files.
+  Batch processor for X12 files used in testing.
 
-  Processes X12 files from various sources (directory scan, remote import, etc)
-  and stores results in the database using the Conversions context.
+  Processes X12 test files and stores results in the database using the Conversions context.
 
   All processing is done IN MEMORY with results stored in the database - no files
   are written to disk except during temporary processing.
@@ -11,14 +10,10 @@ defmodule X12Bridge.BatchProcessor do
   ## Configuration
 
       config :x12_bridge, :batch_processor,
-        input_dir: "priv/batch_processing/input",
         max_concurrency: 10,
         timeout_per_file_ms: 30_000
 
   ## Example Usage
-
-      # Process all files in input directory
-      {:ok, batch} = BatchProcessor.process_input_directory()
 
       # Process specific test batch
       {:ok, batch} = BatchProcessor.process_test_batch("automated_test_data")
@@ -29,7 +24,6 @@ defmodule X12Bridge.BatchProcessor do
   alias X12Bridge.Conversions
 
   @default_config %{
-    input_dir: "priv/batch_processing/input",
     max_concurrency: 10,
     timeout_per_file_ms: 30_000
   }
@@ -45,30 +39,6 @@ defmodule X12Bridge.BatchProcessor do
       :processing_time_ms,
       jobs: []
     ]
-  end
-
-  @doc """
-  Process all X12 files in the input directory.
-
-  Creates a batch in the database and processes all files concurrently,
-  storing results in the database (no file output).
-  """
-  def process_input_directory(opts \\ []) do
-    config = get_config(opts)
-
-    with {:ok, files} <- scan_input_directory(config),
-         {:ok, result} <- process_files_to_database(files, "input_directory", config) do
-      Logger.info("Batch completed: #{result.successful_files}/#{result.total_files} successful")
-      {:ok, result}
-    else
-      {:error, :no_files} ->
-        Logger.info("No files found in input directory")
-        {:ok, %BatchResult{total_files: 0, successful_files: 0, failed_files: 0, jobs: []}}
-
-      {:error, reason} = error ->
-        Logger.error("Batch processing failed: #{inspect(reason)}")
-        error
-    end
   end
 
   @doc """
@@ -179,10 +149,6 @@ defmodule X12Bridge.BatchProcessor do
     }
 
     {:ok, result}
-  end
-
-  defp scan_input_directory(config) do
-    scan_directory(config.input_dir, "*.x12")
   end
 
   defp scan_directory(directory, pattern) do

@@ -2,7 +2,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   @moduledoc """
   Enhanced Batch Processing page that supports:
   1. Web upload (database-backed)
-  2. Remote import (HTTP/HTTPS)
+  2. Remote import (HTTP/HTTPS/local files)
   3. Real-time progress updates
   """
   use X12BridgeWeb, :live_view
@@ -11,7 +11,6 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   alias X12Bridge.Conversions
   alias X12Bridge.Conversions.Batch
-  alias X12Bridge.BatchProcessor
   alias X12Bridge.RemoteFetcher
 
   @impl true
@@ -29,83 +28,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:batches, batches)
      |> assign(:current_batch, nil)
      |> assign(:viewing_job_id, nil)  # Track which job's JSON is being viewed
-     |> assign(:processing_mode, :upload)  # :upload, :hot_folder, or :remote_import
-     |> assign(:hot_folder_status, nil)
-     |> assign(:hot_folder_result, nil)
+     |> assign(:processing_mode, :upload)  # :upload or :remote_import
      |> assign(:remote_status, nil)  # nil, :processing, :completed, :error
      |> assign(:remote_result, nil)
-     |> assign(:processing_status, nil)  # NEW: Track active processing
+     |> assign(:processing_status, nil)  # Track active processing
      |> allow_upload(:batch_files,
          accept: [".x12", ".edi", ".txt", ".zip"],
          max_entries: 50,
          max_file_size: 10_000_000)}
   end
 
-  # === HOT FOLDER EVENTS ===
+  # === MODE SWITCHING ===
 
   @impl true
   def handle_event("switch_mode", %{"mode" => mode}, socket) do
     mode_atom = String.to_existing_atom(mode)
     {:noreply, assign(socket, :processing_mode, mode_atom)}
-  end
-
-  @impl true
-  def handle_event("process_hot_folder", _params, socket) do
-    # Process files from the hot folder
-    Task.start(fn ->
-      result = BatchProcessor.process_input_directory()
-      Phoenix.PubSub.broadcast(
-        X12Bridge.PubSub,
-        "batch_processor",
-        {:hot_folder_completed, result}
-      )
-    end)
-
-    {:noreply,
-     socket
-     |> assign(:hot_folder_status, :processing)
-     |> put_flash(:info, "Processing hot folder files...")}
-  end
-
-  @impl true
-  def handle_event("process_test_batch_hot_folder", %{"batch_name" => batch_name}, socket) do
-    # Process test batch using hot folder method
-    Task.start(fn ->
-      result = BatchProcessor.process_test_batch(batch_name)
-      Phoenix.PubSub.broadcast(
-        X12Bridge.PubSub,
-        "batch_processor",
-        {:hot_folder_completed, result}
-      )
-    end)
-
-    {:noreply,
-     socket
-     |> assign(:hot_folder_status, :processing)
-     |> put_flash(:info, "Processing test batch: #{batch_name}...")}
-  end
-
-  @impl true
-  def handle_event("view_hot_folder_results", _params, socket) do
-    # Open output directory in finder (Mac) or file explorer
-    output_dir = "priv/batch_processing/output"
-
-    case :os.type() do
-      {:unix, :darwin} -> System.cmd("open", [output_dir])
-      {:unix, _} -> System.cmd("xdg-open", [output_dir])
-      {:win32, _} -> System.cmd("explorer", [output_dir])
-      _ -> :ok
-    end
-
-    {:noreply, put_flash(socket, :info, "Opening output directory...")}
-  end
-
-  @impl true
-  def handle_event("clear_hot_folder_result", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:hot_folder_result, nil)
-     |> assign(:hot_folder_status, nil)}
   end
 
   # === REMOTE IMPORT EVENTS ===
@@ -371,23 +309,6 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:current_batch, batch)
      |> assign(:processing_status, :completed)  # Mark as completed
      |> put_flash(:info, "Batch completed! #{batch.completed_files} successful, #{batch.failed_files} failed")}
-  end
-
-  @impl true
-  def handle_info({:hot_folder_completed, {:ok, result}}, socket) do
-    {:noreply,
-     socket
-     |> assign(:hot_folder_status, :completed)
-     |> assign(:hot_folder_result, result)
-     |> put_flash(:info, "Hot folder processing complete! #{result.successful_files}/#{result.total_files} successful")}
-  end
-
-  @impl true
-  def handle_info({:hot_folder_completed, {:error, :no_files}}, socket) do
-    {:noreply,
-     socket
-     |> assign(:hot_folder_status, :no_files)
-     |> put_flash(:info, "No files found in input directory")}
   end
 
   @impl true

@@ -56,69 +56,6 @@ defmodule X12Bridge.BatchProcessorTest do
     end
   end
 
-  describe "process_input_directory/1" do
-    setup do
-      # Create temporary input directory with test files
-      input_dir = "priv/batch_processing/input_test_#{:os.system_time(:millisecond)}"
-      File.mkdir_p!(input_dir)
-
-      # Copy test files to input directory
-      File.cp!(
-        "test/fixtures/automated_test_data/001_837p_valid.x12",
-        Path.join(input_dir, "001_837p_valid.x12")
-      )
-
-      File.cp!(
-        "test/fixtures/automated_test_data/002_837i_valid.x12",
-        Path.join(input_dir, "002_837i_valid.x12")
-      )
-
-      on_exit(fn ->
-        File.rm_rf!(input_dir)
-      end)
-
-      {:ok, input_dir: input_dir}
-    end
-
-    test "processes files from input directory", %{input_dir: input_dir} do
-      {:ok, result} = BatchProcessor.process_input_directory(input_dir: input_dir)
-
-      assert %BatchResult{} = result
-      assert result.total_files == 2
-      assert result.successful_files == 2
-      assert result.failed_files == 0
-
-      # Verify batch in database
-      batch = Conversions.get_batch!(result.batch_id)
-      assert batch.name == "input_directory"
-      assert batch.total_files == 2
-      assert batch.completed_files == 2
-
-      # Verify all jobs have round-trip validation
-      Enum.each(result.jobs, fn job ->
-        assert job.status == "completed"
-        assert job.roundtrip_valid == true
-        assert job.json_result != nil
-      end)
-    end
-
-    test "returns success with empty result when no files found", %{input_dir: input_dir} do
-      # Remove all files from input directory
-      File.ls!(input_dir)
-      |> Enum.each(fn file ->
-        File.rm!(Path.join(input_dir, file))
-      end)
-
-      {:ok, result} = BatchProcessor.process_input_directory(input_dir: input_dir)
-
-      assert %BatchResult{} = result
-      assert result.total_files == 0
-      assert result.successful_files == 0
-      assert result.failed_files == 0
-      assert result.jobs == []
-    end
-  end
-
   describe "batch results structure" do
     test "includes database batch record" do
       {:ok, result} = BatchProcessor.process_test_batch("automated_test_data")

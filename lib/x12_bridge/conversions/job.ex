@@ -15,6 +15,11 @@ defmodule X12Bridge.Conversions.Job do
     field :processing_time_ms, :integer
     field :progress, :integer, default: 0
 
+    # Round-trip validation fields
+    field :roundtrip_valid, :boolean
+    field :roundtrip_diff, :string
+    field :roundtrip_error, :string
+
     belongs_to :batch, X12Bridge.Conversions.Batch
 
     timestamps()
@@ -23,7 +28,7 @@ defmodule X12Bridge.Conversions.Job do
   @doc false
   def changeset(job, attrs) do
     job
-    |> cast(attrs, [:batch_id, :original_filename, :file_size, :status, :json_result, :x12_content, :error_message, :processing_time_ms, :progress])
+    |> cast(attrs, [:batch_id, :original_filename, :file_size, :status, :json_result, :x12_content, :error_message, :processing_time_ms, :progress, :roundtrip_valid, :roundtrip_diff, :roundtrip_error])
     |> validate_required([:original_filename])
     |> validate_inclusion(:status, ["pending", "processing", "completed", "failed"])
   end

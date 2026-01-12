@@ -32,7 +32,6 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:processing_mode, :upload)  # :upload, :hot_folder, or :remote_import
      |> assign(:hot_folder_status, nil)
      |> assign(:hot_folder_result, nil)
-     |> assign(:remote_url, "")
      |> assign(:remote_status, nil)  # nil, :processing, :completed, :error
      |> assign(:remote_result, nil)
      |> assign(:processing_status, nil)  # NEW: Track active processing
@@ -112,18 +111,6 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   # === REMOTE IMPORT EVENTS ===
 
   @impl true
-  def handle_event("update_remote_url", %{"url" => url}, socket) do
-    {:noreply, assign(socket, :remote_url, url)}
-  end
-
-  @impl true
-  def handle_event("update_remote_url", params, socket) do
-    # Fallback for any unexpected param format
-    url = params["url"] || params["value"] || ""
-    {:noreply, assign(socket, :remote_url, url)}
-  end
-
-  @impl true
   def handle_event("process_remote_batch", params, socket) do
     IO.inspect(params, label: "RECEIVED PARAMS")
     source = params["url"] || ""
@@ -194,8 +181,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     {:noreply,
      socket
      |> assign(:remote_result, nil)
-     |> assign(:remote_status, nil)
-     |> assign(:remote_url, "")}
+     |> assign(:remote_status, nil)}
   end
 
   # === DATABASE UPLOAD EVENTS (Original) ===
@@ -711,28 +697,24 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
               Fetch and process X12 files from multiple sources
             </p>
 
-            <form phx-submit="process_remote_batch" class="space-y-4">
-              <div phx-update="ignore" id="remote-url-container">
+            <form phx-submit="process_remote_batch" class="space-y-4" autocomplete="off">
+              <div>
                 <label for="remote-url" class="block text-sm font-medium text-gray-700 mb-2">
                   ZIP File Source
                 </label>
-                <div class="flex gap-2">
-                  <input
-                    type="text"
-                    id="remote-url"
-                    name="url"
-                    placeholder="https://example.com/batch.zip or /path/to/batch.zip or /mnt/data/x12/batch.zip"
-                    class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 bg-white"
-                    autocomplete="off"
-                  />
-                  <button
-                    type="button"
-                    onclick="document.getElementById('remote-url').value = ''"
-                    class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
-                  >
-                    Clear
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  id="remote-url"
+                  name="url"
+                  phx-hook="RemoteUrlInput"
+                  placeholder="Enter URL, file path, or Databricks path"
+                  class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 bg-white"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  required
+                />
                 <p class="mt-2 text-xs text-gray-500">
                   Supports: HTTP/HTTPS URLs • Local file paths • Databricks paths (/mnt/...)
                 </p>

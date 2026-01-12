@@ -1,41 +1,35 @@
 defmodule X12Bridge.BatchProcessor do
   @moduledoc """
-  Hot folder batch processor for X12 files.
+  Batch processor for X12 files.
 
-  Implements the hot folder/watched directory pattern:
-  1. Scans input directory for X12 files
-  2. Processes files concurrently (leveraging Elixir's Task.async_stream)
-  3. Routes successful JSON to output directory
-  4. Routes failed files to failed directory with error reports
+  Processes X12 files from various sources (directory scan, remote import, etc)
+  and stores results in the database using the Conversions context.
+
+  All processing is done IN MEMORY with results stored in the database - no files
+  are written to disk except during temporary processing.
 
   ## Configuration
 
       config :x12_bridge, :batch_processor,
         input_dir: "priv/batch_processing/input",
-        output_dir: "priv/batch_processing/output",
-        failed_dir: "priv/batch_processing/failed",
-        archive_dir: "priv/batch_processing/archive",
         max_concurrency: 10,
         timeout_per_file_ms: 30_000
 
   ## Example Usage
 
       # Process all files in input directory
-      {:ok, result} = BatchProcessor.process_input_directory()
+      {:ok, batch} = BatchProcessor.process_input_directory()
 
-      # Process specific batch
-      {:ok, result} = BatchProcessor.process_batch("batch_20250131_120000")
+      # Process specific test batch
+      {:ok, batch} = BatchProcessor.process_test_batch("automated_test_data")
   """
 
   require Logger
 
-  alias X12Bridge.X12.Converter
+  alias X12Bridge.Conversions
 
   @default_config %{
     input_dir: "priv/batch_processing/input",
-    output_dir: "priv/batch_processing/output",
-    failed_dir: "priv/batch_processing/failed",
-    archive_dir: "priv/batch_processing/archive",
     max_concurrency: 10,
     timeout_per_file_ms: 30_000
   }
@@ -44,47 +38,32 @@ defmodule X12Bridge.BatchProcessor do
     @moduledoc "Result of batch processing"
     defstruct [
       :batch_id,
+      :batch_record,
       :total_files,
       :successful_files,
       :failed_files,
       :processing_time_ms,
-      :output_directory,
-      :failed_directory,
-      :manifest_path,
-      files: []
-    ]
-  end
-
-  defmodule FileResult do
-    @moduledoc "Result of processing a single file"
-    defstruct [
-      :filename,
-      :status,
-      :processing_time_ms,
-      :output_path,
-      :error_message,
-      :claims_count
+      jobs: []
     ]
   end
 
   @doc """
   Process all X12 files in the input directory.
 
-  Creates a new batch with timestamp and processes all files concurrently.
+  Creates a batch in the database and processes all files concurrently,
+  storing results in the database (no file output).
   """
   def process_input_directory(opts \\ []) do
     config = get_config(opts)
-    batch_id = generate_batch_id()
 
     with {:ok, files} <- scan_input_directory(config),
-         :ok <- ensure_output_directories(batch_id, config),
-         {:ok, result} <- process_files(batch_id, files, config) do
-      Logger.info("Batch #{batch_id} completed: #{result.successful_files}/#{result.total_files} successful")
+         {:ok, result} <- process_files_to_database(files, "input_directory", config) do
+      Logger.info("Batch completed: #{result.successful_files}/#{result.total_files} successful")
       {:ok, result}
     else
       {:error, :no_files} ->
         Logger.info("No files found in input directory")
-        {:ok, %BatchResult{batch_id: batch_id, total_files: 0, successful_files: 0, failed_files: 0}}
+        {:ok, %BatchResult{total_files: 0, successful_files: 0, failed_files: 0, jobs: []}}
 
       {:error, reason} = error ->
         Logger.error("Batch processing failed: #{inspect(reason)}")
@@ -101,14 +80,11 @@ defmodule X12Bridge.BatchProcessor do
   """
   def process_test_batch(batch_name, opts \\ []) do
     config = get_config(opts)
-    batch_id = "test_#{batch_name}_#{:os.system_time(:millisecond)}"
-
     test_batch_dir = Path.join("test/fixtures", batch_name)
 
     with true <- File.exists?(test_batch_dir),
          {:ok, files} <- scan_directory(test_batch_dir, "*.x12"),
-         :ok <- ensure_output_directories(batch_id, config),
-         {:ok, result} <- process_files(batch_id, files, config) do
+         {:ok, result} <- process_files_to_database(files, batch_name, config) do
       Logger.info("Test batch #{batch_name} completed: #{result.successful_files}/#{result.total_files} successful")
       {:ok, result}
     else
@@ -118,67 +94,6 @@ defmodule X12Bridge.BatchProcessor do
       {:error, reason} = error ->
         Logger.error("Test batch processing failed: #{inspect(reason)}")
         error
-    end
-  end
-
-  @doc """
-  Process a single file and return result.
-
-  Used internally by the batch processor.
-  """
-  def process_single_file(file_path, batch_id, config) do
-    start_time = System.monotonic_time(:millisecond)
-    filename = Path.basename(file_path)
-
-    Logger.debug("Processing file: #{filename}")
-
-    case File.read(file_path) do
-      {:ok, content} ->
-        case Converter.convert_content(content) do
-          {:ok, json} ->
-            # Write JSON to output directory
-            output_path = build_output_path(batch_id, filename, config)
-            File.write!(output_path, json)
-
-            # Count claims in JSON
-            claims_count = count_claims(json)
-
-            processing_time = System.monotonic_time(:millisecond) - start_time
-
-            %FileResult{
-              filename: filename,
-              status: :success,
-              processing_time_ms: processing_time,
-              output_path: output_path,
-              claims_count: claims_count
-            }
-
-          {:error, reason} ->
-            # Move failed file to failed directory
-            {failed_path, _error_report_path} = handle_failed_file(file_path, batch_id, reason, config)
-
-            processing_time = System.monotonic_time(:millisecond) - start_time
-
-            %FileResult{
-              filename: filename,
-              status: :failed,
-              processing_time_ms: processing_time,
-              output_path: failed_path,
-              error_message: inspect(reason)
-            }
-        end
-
-      {:error, reason} ->
-        Logger.error("Failed to read file #{filename}: #{inspect(reason)}")
-
-        processing_time = System.monotonic_time(:millisecond) - start_time
-
-        %FileResult{
-          filename: filename,
-          status: :failed,
-          processing_time_ms: processing_time,
-          error_message: "Failed to read file: #{inspect(reason)}"
-        }
     end
   end
 
@@ -192,9 +107,78 @@ defmodule X12Bridge.BatchProcessor do
     |> Map.merge(Map.new(opts))
   end
 
-  defp generate_batch_id do
-    timestamp = DateTime.utc_now() |> DateTime.to_unix(:millisecond)
-    "batch_#{timestamp}"
+  # Process files and store in database (no file output)
+  defp process_files_to_database(file_paths, batch_name, config) do
+    start_time = System.monotonic_time(:millisecond)
+    total_files = length(file_paths)
+
+    # Create batch in database
+    {:ok, batch} = Conversions.create_batch(%{
+      name: batch_name,
+      total_files: total_files,
+      completed_files: 0,
+      failed_files: 0,
+      status: "processing"
+    })
+
+    Logger.info("Processing batch #{batch.id} with #{total_files} files (max concurrency: #{config.max_concurrency})")
+
+    # Read all files into memory
+    uploaded_files =
+      file_paths
+      |> Enum.map(fn file_path ->
+        filename = Path.basename(file_path)
+        case File.read(file_path) do
+          {:ok, content} ->
+            file_size = byte_size(content)
+
+            # Create job in database
+            {:ok, job} = Conversions.create_job(%{
+              batch_id: batch.id,
+              original_filename: filename,
+              file_size: file_size,
+              status: "pending"
+            })
+
+            {job.id, content}
+
+          {:error, reason} ->
+            Logger.error("Failed to read #{filename}: #{inspect(reason)}")
+
+            # Create failed job
+            {:ok, job} = Conversions.create_job(%{
+              batch_id: batch.id,
+              original_filename: filename,
+              file_size: 0,
+              status: "failed",
+              error_message: "Failed to read file: #{inspect(reason)}"
+            })
+
+            {job.id, nil}
+        end
+      end)
+      |> Enum.filter(fn {_job_id, content} -> content != nil end)
+      |> Map.new()
+
+    # Process batch synchronously (includes round-trip validation)
+    Conversions.process_batch_sync(batch.id, uploaded_files)
+
+    # Reload batch to get updated stats
+    batch = Conversions.get_batch!(batch.id)
+
+    processing_time = System.monotonic_time(:millisecond) - start_time
+
+    result = %BatchResult{
+      batch_id: batch.id,
+      batch_record: batch,
+      total_files: batch.total_files,
+      successful_files: batch.completed_files,
+      failed_files: batch.failed_files,
+      processing_time_ms: processing_time,
+      jobs: batch.jobs
+    }
+
+    {:ok, result}
   end
 
   defp scan_input_directory(config) do
@@ -217,142 +201,6 @@ defmodule X12Bridge.BatchProcessor do
       {:error, :no_files}
     else
       {:ok, files}
-    end
-  end
-
-  defp ensure_output_directories(batch_id, config) do
-    output_batch_dir = Path.join(config.output_dir, batch_id)
-    failed_batch_dir = Path.join(config.failed_dir, batch_id)
-
-    File.mkdir_p!(output_batch_dir)
-    File.mkdir_p!(failed_batch_dir)
-
-    :ok
-  end
-
-  defp process_files(batch_id, files, config) do
-    start_time = System.monotonic_time(:millisecond)
-    total_files = length(files)
-
-    Logger.info("Processing batch #{batch_id} with #{total_files} files (max concurrency: #{config.max_concurrency})")
-
-    # Process files concurrently using Task.async_stream
-    results =
-      files
-      |> Task.async_stream(
-        fn file_path -> process_single_file(file_path, batch_id, config) end,
-        max_concurrency: config.max_concurrency,
-        timeout: config.timeout_per_file_ms,
-        on_timeout: :kill_task
-      )
-      |> Enum.map(fn
-        {:ok, result} -> result
-        {:exit, reason} ->
-          Logger.error("Task exited: #{inspect(reason)}")
-          %FileResult{filename: "unknown", status: :failed, error_message: "Task timeout or crash"}
-      end)
-
-    processing_time = System.monotonic_time(:millisecond) - start_time
-
-    successful_files = Enum.count(results, fn r -> r.status == :success end)
-    failed_files = Enum.count(results, fn r -> r.status == :failed end)
-
-    # Generate batch manifest
-    manifest_path = generate_manifest(batch_id, results, processing_time, config)
-
-    # Clean up input files after successful processing
-    cleanup_input_files(files, config)
-
-    result = %BatchResult{
-      batch_id: batch_id,
-      total_files: total_files,
-      successful_files: successful_files,
-      failed_files: failed_files,
-      processing_time_ms: processing_time,
-      output_directory: Path.join(config.output_dir, batch_id),
-      failed_directory: Path.join(config.failed_dir, batch_id),
-      manifest_path: manifest_path,
-      files: results
-    }
-
-    {:ok, result}
-  end
-
-  defp build_output_path(batch_id, filename, config) do
-    output_batch_dir = Path.join(config.output_dir, batch_id)
-    json_filename = Path.rootname(filename) <> ".json"
-    Path.join(output_batch_dir, json_filename)
-  end
-
-  defp handle_failed_file(file_path, batch_id, reason, config) do
-    failed_batch_dir = Path.join(config.failed_dir, batch_id)
-    filename = Path.basename(file_path)
-
-    # Copy original X12 file to failed directory
-    failed_file_path = Path.join(failed_batch_dir, filename)
-    File.cp!(file_path, failed_file_path)
-
-    # Create error report
-    error_report = %{
-      filename: filename,
-      error: inspect(reason),
-      timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
-      original_path: file_path
-    }
-
-    error_report_path = Path.join(failed_batch_dir, "#{Path.rootname(filename)}_error.json")
-    error_json = Jason.encode!(error_report, pretty: true)
-    File.write!(error_report_path, error_json)
-
-    {failed_file_path, error_report_path}
-  end
-
-  defp generate_manifest(batch_id, results, processing_time_ms, config) do
-    output_batch_dir = Path.join(config.output_dir, batch_id)
-
-    manifest = %{
-      batch_id: batch_id,
-      timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
-      total_files: length(results),
-      successful_files: Enum.count(results, fn r -> r.status == :success end),
-      failed_files: Enum.count(results, fn r -> r.status == :failed end),
-      total_processing_time_ms: processing_time_ms,
-      files: Enum.map(results, &file_result_to_map/1)
-    }
-
-    manifest_path = Path.join(output_batch_dir, "manifest.json")
-    manifest_json = Jason.encode!(manifest, pretty: true)
-    File.write!(manifest_path, manifest_json)
-
-    manifest_path
-  end
-
-  defp file_result_to_map(%FileResult{} = result) do
-    %{
-      filename: result.filename,
-      status: to_string(result.status),
-      processing_time_ms: result.processing_time_ms,
-      output_path: result.output_path,
-      error_message: result.error_message,
-      claims_count: result.claims_count
-    }
-  end
-
-  defp cleanup_input_files(files, _config) do
-    # Move processed files to archive or delete them
-    # For now, we'll leave them in place for debugging
-    # In production, you'd move them to archive directory
-    Enum.each(files, fn file_path ->
-      Logger.debug("File processed: #{file_path}")
-      # File.rm(file_path)  # Uncomment to delete after processing
-    end)
-  end
-
-  defp count_claims(json_string) when is_binary(json_string) do
-    case Jason.decode(json_string) do
-      {:ok, %{"claims" => claims}} when is_list(claims) -> length(claims)
-      {:ok, %{"summary" => %{"total_claims" => count}}} -> count
-      _ -> 0
     end
   end
 end

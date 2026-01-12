@@ -6,7 +6,7 @@ defmodule X12Bridge.Conversions do
   import Ecto.Query
   alias X12Bridge.Repo
   alias X12Bridge.Conversions.{Batch, Job}
-  alias X12Bridge.X12.Converter
+  alias X12Bridge.X12.{Converter, RoundtripValidator}
 
   ## Batch functions
 
@@ -143,24 +143,51 @@ defmodule X12Bridge.Conversions do
 
   @doc """
   Processes a single file synchronously (for testing/small files).
+
+  IMPORTANT: This includes round-trip validation as an initial phase.
+  The conversion will FAIL if round-trip validation fails (strict mode).
   """
   def process_file_sync(file_content, _filename) do
     start_time = System.monotonic_time(:millisecond)
 
-    result = case Converter.convert_content(file_content) do
-      {:ok, json} ->
-        %{
-          status: "completed",
-          json_result: json,
-          processing_time_ms: System.monotonic_time(:millisecond) - start_time
-        }
+    # STEP 1: Perform round-trip validation FIRST
+    validation_result = RoundtripValidator.validate(file_content)
 
-      {:error, reason} ->
-        %{
-          status: "failed",
-          error_message: inspect(reason),
-          processing_time_ms: System.monotonic_time(:millisecond) - start_time
-        }
+    result = if validation_result.valid? do
+      # STEP 2: Round-trip validation passed, proceed with conversion
+      case Converter.convert_content(file_content) do
+        {:ok, json} ->
+          %{
+            status: "completed",
+            json_result: json,
+            processing_time_ms: System.monotonic_time(:millisecond) - start_time,
+            roundtrip_valid: true,
+            roundtrip_diff: nil,
+            roundtrip_error: nil
+          }
+
+        {:error, reason} ->
+          %{
+            status: "failed",
+            error_message: inspect(reason),
+            processing_time_ms: System.monotonic_time(:millisecond) - start_time,
+            roundtrip_valid: false,
+            roundtrip_diff: nil,
+            roundtrip_error: "Conversion failed: #{inspect(reason)}"
+          }
+      end
+    else
+      # STEP 3: Round-trip validation FAILED - block conversion
+      formatted_diff = RoundtripValidator.format_result(validation_result)
+
+      %{
+        status: "failed",
+        error_message: "Round-trip validation failed - X12 cannot be perfectly reconstructed from JSON",
+        processing_time_ms: System.monotonic_time(:millisecond) - start_time,
+        roundtrip_valid: false,
+        roundtrip_diff: formatted_diff,
+        roundtrip_error: validation_result.error_message || "X12 reconstruction differs from original"
+      }
     end
 
     {:ok, result}

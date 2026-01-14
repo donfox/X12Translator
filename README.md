@@ -65,19 +65,17 @@ All documentation is in the [`docs/`](docs/) directory:
 
 | Document | Purpose |
 |----------|---------|
-| [**GUIDE.md**](docs/GUIDE.md) | **Complete guide** - Installation, usage, and Elixir fundamentals |
-| [**ARCHITECTURE.md**](docs/ARCHITECTURE.md) | System design with 7 Mermaid diagrams |
-| [**DATABASE.md**](docs/DATABASE.md) | Schema, ERD, queries, migrations |
-| [**BATCH_PROCESSING.md**](docs/BATCH_PROCESSING.md) | Batch processing and remote import |
-| [**API_REFERENCE.md**](docs/API_REFERENCE.md) | Module and function documentation |
+| [**ARCHITECTURE.md**](docs/ARCHITECTURE.md) | **System design** - Module responsibilities, data flow, two-stage pipeline, configuration |
+| [**API.md**](docs/API.md) | **Developer reference** - Database schema, error codes, module functions, remote import |
 
 ### Quick Links
 
-- **New to X12Bridge?** → [GUIDE.md](docs/GUIDE.md) - Start here!
-- **Understanding the system?** → [ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- **Database schema?** → [DATABASE.md](docs/DATABASE.md)
-- **Batch processing?** → [BATCH_PROCESSING.md](docs/BATCH_PROCESSING.md)
-- **API functions?** → [API_REFERENCE.md](docs/API_REFERENCE.md)
+- **New to X12Bridge?** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Start here!
+- **Understanding two-stage pipeline?** → [ARCHITECTURE.md](docs/ARCHITECTURE.md#stage-1-verification-free)
+- **Database schema?** → [API.md](docs/API.md#database-schema)
+- **Error codes?** → [API.md](docs/API.md#error-codes--messages)
+- **Remote import?** → [API.md](docs/API.md#remote-import-configuration)
+- **API functions?** → [API.md](docs/API.md#module-function-reference)
 
 ---
 

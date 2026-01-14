@@ -37,7 +37,8 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       assert String.starts_with?(rebuilt_x12, "ISA*")
-      assert String.contains?(rebuilt_x12, "SV2*")  # Institutional service segment
+      # Institutional service segment
+      assert String.contains?(rebuilt_x12, "SV2*")
     end
 
     test "builds X12 from parsed 837D structure" do
@@ -49,7 +50,8 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       assert String.starts_with?(rebuilt_x12, "ISA*")
-      assert String.contains?(rebuilt_x12, "SV3*")  # Dental service segment
+      # Dental service segment
+      assert String.contains?(rebuilt_x12, "SV3*")
     end
 
     test "preserves all envelope segments" do
@@ -88,11 +90,19 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Verify CLM segments (claims)
-      clm_count = rebuilt_x12 |> String.split("~", trim: true) |> Enum.count(&String.starts_with?(&1, "CLM*"))
+      clm_count =
+        rebuilt_x12
+        |> String.split("~", trim: true)
+        |> Enum.count(&String.starts_with?(&1, "CLM*"))
+
       assert clm_count > 0
 
       # Verify service line segments
-      sv1_count = rebuilt_x12 |> String.split("~", trim: true) |> Enum.count(&String.starts_with?(&1, "SV1*"))
+      sv1_count =
+        rebuilt_x12
+        |> String.split("~", trim: true)
+        |> Enum.count(&String.starts_with?(&1, "SV1*"))
+
       assert sv1_count > 0
     end
 
@@ -105,7 +115,11 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Should have CLM segments (file name is misleading, only has 1 claim but multiple service lines)
-      clm_count = rebuilt_x12 |> String.split("~", trim: true) |> Enum.count(&String.starts_with?(&1, "CLM*"))
+      clm_count =
+        rebuilt_x12
+        |> String.split("~", trim: true)
+        |> Enum.count(&String.starts_with?(&1, "CLM*"))
+
       assert clm_count >= 1
 
       # Should preserve structure
@@ -180,9 +194,12 @@ defmodule X12Bridge.X12.BuilderTest do
 
       # Extract billing provider from original
       {:ok, %{delimiters: delimiters, segments: original_segments}} = Parser.parse(x12_content)
-      original_nm1_85 = Enum.find(original_segments, fn seg ->
-        seg.id == "NM1" && Parser.get_element(seg, 1) == "85"
-      end)
+
+      original_nm1_85 =
+        Enum.find(original_segments, fn seg ->
+          seg.id == "NM1" && Parser.get_element(seg, 1) == "85"
+        end)
+
       original_provider_name = Parser.get_element(original_nm1_85, 3)
 
       # Round-trip
@@ -191,9 +208,12 @@ defmodule X12Bridge.X12.BuilderTest do
 
       # Extract billing provider from rebuilt
       {:ok, %{segments: rebuilt_segments}} = Parser.parse(rebuilt_x12)
-      rebuilt_nm1_85 = Enum.find(rebuilt_segments, fn seg ->
-        seg.id == "NM1" && Parser.get_element(seg, 1) == "85"
-      end)
+
+      rebuilt_nm1_85 =
+        Enum.find(rebuilt_segments, fn seg ->
+          seg.id == "NM1" && Parser.get_element(seg, 1) == "85"
+        end)
+
       rebuilt_provider_name = Parser.get_element(rebuilt_nm1_85, 3)
 
       # Provider name should be preserved
@@ -207,10 +227,37 @@ defmodule X12Bridge.X12.BuilderTest do
       minimal_structure = %{
         file_info: %{},
         interchange_header: %{
-          all_elements: ["ISA", "00", "          ", "00", "          ", "ZZ", "SENDER", "ZZ", "RECEIVER", "250101", "1200", "U", "00401", "000000001", "0", "P"]
+          all_elements: [
+            "ISA",
+            "00",
+            "          ",
+            "00",
+            "          ",
+            "ZZ",
+            "SENDER",
+            "ZZ",
+            "RECEIVER",
+            "250101",
+            "1200",
+            "U",
+            "00401",
+            "000000001",
+            "0",
+            "P"
+          ]
         },
         functional_group: %{
-          all_elements: ["GS", "HC", "SENDER", "RECEIVER", "20250101", "1200", "1", "X", "004010X098A1"]
+          all_elements: [
+            "GS",
+            "HC",
+            "SENDER",
+            "RECEIVER",
+            "20250101",
+            "1200",
+            "1",
+            "X",
+            "004010X098A1"
+          ]
         },
         transaction_set: %{
           all_elements: ["ST", "837", "0001"],

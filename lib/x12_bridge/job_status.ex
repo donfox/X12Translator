@@ -1,11 +1,11 @@
 defmodule X12Bridge.JobStatus do
   @moduledoc """
-  Centralized job status definitions.
+  Centralized status definitions for jobs and batches.
 
-  Provides a single source of truth for all valid job statuses,
+  Provides a single source of truth for all valid statuses (jobs and batches),
   preventing typos and making it easy to enumerate all states.
 
-  ## Status Flow
+  ## Job Status Flow
 
   ```
                       ┌─ failed_verification
@@ -17,17 +17,26 @@ defmodule X12Bridge.JobStatus do
                                                    (conversion/round-trip error)
   ```
 
+  ## Batch Status Flow
+
+  Batches track overall progress of multi-file processing:
+  - `uploaded` - Files staged, ready for verification
+  - `verifying` - Running Stage 1 (FREE verification)
+  - `verified` - Verification complete (may have some failures)
+  - `translating` - Running Stage 2 (BILLED translation) on verified files
+  - `translated` - Translation complete
+  - `completed` - Batch fully processed and archived
+  - `failed` - Batch failed before completion
+
   ## Legacy Statuses
 
   These statuses are for backward compatibility with single-stage processing:
   - `pending` - Legacy: queued for processing
   - `processing` - Legacy: actively processing
-  - `completed` - Legacy: finished successfully
-  - `failed` - Legacy: finished with error
   """
 
-  @statuses [
-    # Two-stage pipeline
+  # Job-specific statuses (two-stage pipeline)
+  @job_statuses [
     :uploaded,
     :verifying,
     :verified,
@@ -42,7 +51,22 @@ defmodule X12Bridge.JobStatus do
     :failed
   ]
 
-  @statuses_strings Enum.map(@statuses, &to_string/1)
+  # Batch-specific statuses (multi-file tracking)
+  @batch_statuses [
+    :uploaded,
+    :verifying,
+    :verified,
+    :translating,
+    :translated,
+    :completed,
+    :failed,
+    # Legacy
+    :pending,
+    :processing
+  ]
+
+  @all_statuses (@job_statuses ++ @batch_statuses) |> Enum.uniq()
+  @all_statuses_strings Enum.map(@all_statuses, &to_string/1)
 
   @doc """
   List all valid job statuses as atoms.
@@ -52,7 +76,14 @@ defmodule X12Bridge.JobStatus do
       iex> JobStatus.list_all()
       [:uploaded, :verifying, :verified, :failed_verification, :translating, :translated, :failed_translation, :pending, :processing, :completed, :failed]
   """
-  def list_all, do: @statuses
+  def list_all, do: @job_statuses
+
+  @doc """
+  List all valid job and batch statuses as atoms.
+
+  Use when validating either job or batch status fields.
+  """
+  def list_all_combined, do: @all_statuses
 
   @doc """
   List all valid job statuses as strings.
@@ -64,10 +95,17 @@ defmodule X12Bridge.JobStatus do
       iex> JobStatus.list_all_strings()
       ["uploaded", "verifying", "verified", "failed_verification", "translating", "translated", "failed_translation", "pending", "processing", "completed", "failed"]
   """
-  def list_all_strings, do: @statuses_strings
+  def list_all_strings, do: Enum.map(@job_statuses, &to_string/1)
 
   @doc """
-  Check if a status is valid.
+  List all valid batch statuses as strings.
+
+  Used for database validation.
+  """
+  def list_batch_status_strings, do: Enum.map(@batch_statuses, &to_string/1)
+
+  @doc """
+  Check if a status is valid for jobs.
 
   Accepts both atoms and strings for flexibility.
 

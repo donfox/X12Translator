@@ -110,7 +110,8 @@ defmodule X12Bridge.X12.RoundtripValidator do
             type: :segment_count_mismatch,
             original_count: original_count,
             rebuilt_count: rebuilt_count,
-            message: "Segment count mismatch: original has #{original_count}, rebuilt has #{rebuilt_count}"
+            message:
+              "Segment count mismatch: original has #{original_count}, rebuilt has #{rebuilt_count}"
           }
         ],
         original_segments: original_count,

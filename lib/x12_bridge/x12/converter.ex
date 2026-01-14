@@ -68,32 +68,38 @@ defmodule X12Bridge.X12.Converter do
 
   # Internal function with timeout wrapper and error handling
   defp do_convert_content(content) do
-    task = Task.async(fn ->
-      try do
-        case Parser.parse(content) do
-          {:ok, %{delimiters: delimiters, segments: segments}} ->
-            # build_structure always returns {:ok, ...}, so we can pattern match directly
-            {:ok, structured_data} = build_structure(segments, delimiters)
-            Jason.encode(structured_data, pretty: true)
-          {:error, reason} ->
-            {:error, "Parsing failed: #{inspect(reason)}"}
+    task =
+      Task.async(fn ->
+        try do
+          case Parser.parse(content) do
+            {:ok, %{delimiters: delimiters, segments: segments}} ->
+              # build_structure always returns {:ok, ...}, so we can pattern match directly
+              {:ok, structured_data} = build_structure(segments, delimiters)
+              Jason.encode(structured_data, pretty: true)
+
+            {:error, reason} ->
+              {:error, "Parsing failed: #{inspect(reason)}"}
+          end
+        rescue
+          e in ArgumentError ->
+            {:error, "Invalid X12 format: #{Exception.message(e)}"}
+
+          e in RuntimeError ->
+            {:error, "Processing error: #{Exception.message(e)}"}
+
+          e ->
+            {:error, "Unexpected error: #{Exception.message(e)}"}
         end
-      rescue
-        e in ArgumentError ->
-          {:error, "Invalid X12 format: #{Exception.message(e)}"}
-        e in RuntimeError ->
-          {:error, "Processing error: #{Exception.message(e)}"}
-        e ->
-          {:error, "Unexpected error: #{Exception.message(e)}"}
-      end
-    end)
+      end)
 
     case Task.yield(task, @processing_timeout_ms) || Task.shutdown(task) do
       {:ok, result} ->
         result
+
       nil ->
         timeout_sec = div(@processing_timeout_ms, 1000)
         {:error, "Processing timeout: File took longer than #{timeout_sec} seconds to process"}
+
       {:exit, reason} ->
         {:error, "Processing crashed: #{inspect(reason)}"}
     end
@@ -132,7 +138,8 @@ defmodule X12Bridge.X12.Converter do
     subscriber = extract_subscriber(segments)
 
     # Check for missing entities
-    warnings = warnings |> add_warning_if_nil(billing_provider, "No billing provider (NM1*85) found")
+    warnings =
+      warnings |> add_warning_if_nil(billing_provider, "No billing provider (NM1*85) found")
 
     # Extract claims
     claims = Enum.map(loops, &extract_claim(&1, delimiters))
@@ -202,85 +209,99 @@ defmodule X12Bridge.X12.Converter do
   end
 
   # Extract claim information from a loop
-  defp extract_claim(%{claim_segment: clm_segment, claim_segments: claim_segs, service_lines: service_lines}, delimiters) do
+  defp extract_claim(
+         %{claim_segment: clm_segment, claim_segments: claim_segs, service_lines: service_lines},
+         delimiters
+       ) do
     # Extract basic claim info from CLM segment
     claim_id = Parser.get_element(clm_segment, 1)
     total_charge = Parser.get_element(clm_segment, 2)
     claim_filing_code = Parser.get_element(clm_segment, 5)
 
     # Find related segments (get raw segment, not processed entity)
-    patient_nm1_segment = Enum.find(claim_segs, fn seg ->
-      seg.id == "NM1" && Parser.get_element(seg, 1) == "QC"
-    end)
+    patient_nm1_segment =
+      Enum.find(claim_segs, fn seg ->
+        seg.id == "NM1" && Parser.get_element(seg, 1) == "QC"
+      end)
 
     # Extract dates with full structure
-    dates = claim_segs
-    |> Enum.filter(fn seg -> seg.id == "DTP" end)
-    |> Enum.map(fn dtp ->
-      qualifier = Parser.get_element(dtp, 1)
-      %{
-        segment_id: "DTP",
-        date_qualifier: qualifier,
-        date_qualifier_desc: date_qualifier(qualifier),
-        date_format: Parser.get_element(dtp, 2),
-        date_value: Parser.get_element(dtp, 3),
-        all_elements: dtp.elements
-      }
-    end)
-
-    # Extract references with full structure
-    references = claim_segs
-    |> Enum.filter(fn seg -> seg.id == "REF" end)
-    |> Enum.map(fn ref ->
-      qualifier = Parser.get_element(ref, 1)
-      %{
-        segment_id: "REF",
-        reference_id_qualifier: qualifier,
-        reference_id_qualifier_desc: reference_qualifier(qualifier),
-        reference_id: Parser.get_element(ref, 2),
-        description: Parser.get_element(ref, 3),
-        all_elements: ref.elements
-      }
-    end)
-
-    # Extract diagnosis codes with full structure
-    diagnosis_codes_data = claim_segs
-    |> Enum.filter(fn seg -> seg.id == "HI" end)
-    |> List.first()
-    |> case do
-      nil -> nil
-      hi ->
-        codes = hi.elements
-        |> Enum.drop(1)
-        |> Enum.reject(fn el -> el == "" end)
+    dates =
+      claim_segs
+      |> Enum.filter(fn seg -> seg.id == "DTP" end)
+      |> Enum.map(fn dtp ->
+        qualifier = Parser.get_element(dtp, 1)
 
         %{
-          segment_id: "HI",
-          codes: codes,
-          all_elements: hi.elements
+          segment_id: "DTP",
+          date_qualifier: qualifier,
+          date_qualifier_desc: date_qualifier(qualifier),
+          date_format: Parser.get_element(dtp, 2),
+          date_value: Parser.get_element(dtp, 3),
+          all_elements: dtp.elements
         }
-    end
+      end)
+
+    # Extract references with full structure
+    references =
+      claim_segs
+      |> Enum.filter(fn seg -> seg.id == "REF" end)
+      |> Enum.map(fn ref ->
+        qualifier = Parser.get_element(ref, 1)
+
+        %{
+          segment_id: "REF",
+          reference_id_qualifier: qualifier,
+          reference_id_qualifier_desc: reference_qualifier(qualifier),
+          reference_id: Parser.get_element(ref, 2),
+          description: Parser.get_element(ref, 3),
+          all_elements: ref.elements
+        }
+      end)
+
+    # Extract diagnosis codes with full structure
+    diagnosis_codes_data =
+      claim_segs
+      |> Enum.filter(fn seg -> seg.id == "HI" end)
+      |> List.first()
+      |> case do
+        nil ->
+          nil
+
+        hi ->
+          codes =
+            hi.elements
+            |> Enum.drop(1)
+            |> Enum.reject(fn el -> el == "" end)
+
+          %{
+            segment_id: "HI",
+            codes: codes,
+            all_elements: hi.elements
+          }
+      end
 
     # Extract patient info if present
-    patient = if patient_nm1_segment do
-      entity_code = Parser.get_element(patient_nm1_segment, 1)
-      %{
-        segment_id: "NM1",
-        entity_id_code: entity_code,
-        entity_id_code_desc: entity_code(entity_code),
-        entity_type_qualifier: Parser.get_element(patient_nm1_segment, 2),
-        name_last_or_organization: Parser.get_element(patient_nm1_segment, 3),
-        name_first: Parser.get_element(patient_nm1_segment, 4),
-        name_middle: Parser.get_element(patient_nm1_segment, 5),
-        name_prefix: Parser.get_element(patient_nm1_segment, 6),
-        name_suffix: Parser.get_element(patient_nm1_segment, 7),
-        id_code_qualifier: Parser.get_element(patient_nm1_segment, 8),
-        id_code: Parser.get_element(patient_nm1_segment, 9),
-        all_elements: patient_nm1_segment.elements
-      }
-    else
-      nil
-    end
+    patient =
+      if patient_nm1_segment do
+        entity_code = Parser.get_element(patient_nm1_segment, 1)
+
+        %{
+          segment_id: "NM1",
+          entity_id_code: entity_code,
+          entity_id_code_desc: entity_code(entity_code),
+          entity_type_qualifier: Parser.get_element(patient_nm1_segment, 2),
+          name_last_or_organization: Parser.get_element(patient_nm1_segment, 3),
+          name_first: Parser.get_element(patient_nm1_segment, 4),
+          name_middle: Parser.get_element(patient_nm1_segment, 5),
+          name_prefix: Parser.get_element(patient_nm1_segment, 6),
+          name_suffix: Parser.get_element(patient_nm1_segment, 7),
+          id_code_qualifier: Parser.get_element(patient_nm1_segment, 8),
+          id_code: Parser.get_element(patient_nm1_segment, 9),
+          all_elements: patient_nm1_segment.elements
+        }
+      else
+        nil
+      end
 
     # Extract service lines
     service_lines_data = Enum.map(service_lines, &extract_service_line(&1, delimiters))
@@ -354,6 +375,7 @@ defmodule X12Bridge.X12.Converter do
     diagnosis_pointer = Parser.get_element(sv1, 7)
 
     place_of_service_code = Parser.get_element(sv1, 5)
+
     base_result = %{
       service_info: %{
         segment_id: "SV1",
@@ -399,17 +421,18 @@ defmodule X12Bridge.X12.Converter do
     quantity = Parser.get_element(sv2, 5)
 
     # Extract dates for this service line
-    dates = line_segs
-    |> Enum.filter(fn seg -> seg.id == "DTP" end)
-    |> Enum.map(fn dtp ->
-      %{
-        segment_id: "DTP",
-        date_qualifier: Parser.get_element(dtp, 1),
-        date_format: Parser.get_element(dtp, 2),
-        date_value: Parser.get_element(dtp, 3),
-        all_elements: dtp.elements
-      }
-    end)
+    dates =
+      line_segs
+      |> Enum.filter(fn seg -> seg.id == "DTP" end)
+      |> Enum.map(fn dtp ->
+        %{
+          segment_id: "DTP",
+          date_qualifier: Parser.get_element(dtp, 1),
+          date_format: Parser.get_element(dtp, 2),
+          date_value: Parser.get_element(dtp, 3),
+          all_elements: dtp.elements
+        }
+      end)
 
     base_result = %{
       service_info: %{
@@ -483,16 +506,19 @@ defmodule X12Bridge.X12.Converter do
     # Detect X12 version (4010 vs 5010)
     {x12_version, x12_version_desc} = detect_x12_version(version)
 
-    file_type = case version do
-      v when is_binary(v) and byte_size(v) > 0 ->
-        cond do
-          String.contains?(v, "222") -> "X12 837P Professional Healthcare Claim"
-          String.contains?(v, "223") -> "X12 837I Institutional Healthcare Claim"
-          String.contains?(v, "224") -> "X12 837D Dental Healthcare Claim"
-          true -> "X12 #{transaction_type} Healthcare Claim"
-        end
-      _ -> "X12 #{transaction_type} Healthcare Claim"
-    end
+    file_type =
+      case version do
+        v when is_binary(v) and byte_size(v) > 0 ->
+          cond do
+            String.contains?(v, "222") -> "X12 837P Professional Healthcare Claim"
+            String.contains?(v, "223") -> "X12 837I Institutional Healthcare Claim"
+            String.contains?(v, "224") -> "X12 837D Dental Healthcare Claim"
+            true -> "X12 #{transaction_type} Healthcare Claim"
+          end
+
+        _ ->
+          "X12 #{transaction_type} Healthcare Claim"
+      end
 
     %{
       source_file: "uploaded_file",
@@ -525,6 +551,7 @@ defmodule X12Bridge.X12.Converter do
   defp detect_x12_version(_), do: {"Unknown", "No version information"}
 
   defp extract_interchange_header(nil), do: %{}
+
   defp extract_interchange_header(isa) do
     %{
       segment_id: "ISA",
@@ -548,6 +575,7 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp extract_functional_group(nil), do: %{}
+
   defp extract_functional_group(gs) do
     %{
       segment_id: "GS",
@@ -564,24 +592,26 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp extract_transaction_set(nil, _segments), do: %{}
+
   defp extract_transaction_set(st, segments) do
     # Find BHT segment
     bht = Parser.find_segments(segments, "BHT") |> List.first()
 
-    bht_data = if bht do
-      %{
-        segment_id: "BHT",
-        hierarchical_structure_code: Parser.get_element(bht, 1),
-        transaction_set_purpose_code: Parser.get_element(bht, 2),
-        reference_id: Parser.get_element(bht, 3),
-        date: Parser.get_element(bht, 4),
-        time: Parser.get_element(bht, 5),
-        claim_type: Parser.get_element(bht, 6),
-        all_elements: bht.elements
-      }
-    else
-      nil
-    end
+    bht_data =
+      if bht do
+        %{
+          segment_id: "BHT",
+          hierarchical_structure_code: Parser.get_element(bht, 1),
+          transaction_set_purpose_code: Parser.get_element(bht, 2),
+          reference_id: Parser.get_element(bht, 3),
+          date: Parser.get_element(bht, 4),
+          time: Parser.get_element(bht, 5),
+          claim_type: Parser.get_element(bht, 6),
+          all_elements: bht.elements
+        }
+      else
+        nil
+      end
 
     %{
       segment_id: "ST",
@@ -595,46 +625,52 @@ defmodule X12Bridge.X12.Converter do
 
   defp extract_billing_provider(segments) do
     # Find NM1*85 (billing provider)
-    nm1_85 = segments
-    |> Parser.find_segments("NM1")
-    |> Enum.find(fn seg -> Parser.get_element(seg, 1) == "85" end)
+    nm1_85 =
+      segments
+      |> Parser.find_segments("NM1")
+      |> Enum.find(fn seg -> Parser.get_element(seg, 1) == "85" end)
 
     if nm1_85 do
       # Find associated address segments after this NM1 (within next 10 segments to avoid crossing entity boundaries)
       nm1_index = Enum.find_index(segments, fn seg -> seg == nm1_85 end)
+
       following_segments =
         segments
         |> Enum.drop(nm1_index + 1)
-        |> Enum.take(10)  # Limit search to avoid crossing into different entity
+        # Limit search to avoid crossing into different entity
+        |> Enum.take(10)
 
       n3 = Enum.find(following_segments, fn seg -> seg.id == "N3" end)
       n4 = Enum.find(following_segments, fn seg -> seg.id == "N4" end)
 
-      address = if n3 do
-        %{
-          segment_id: "N3",
-          address_line_1: Parser.get_element(n3, 1),
-          address_line_2: Parser.get_element(n3, 2),
-          all_elements: n3.elements
-        }
-      else
-        nil
-      end
+      address =
+        if n3 do
+          %{
+            segment_id: "N3",
+            address_line_1: Parser.get_element(n3, 1),
+            address_line_2: Parser.get_element(n3, 2),
+            all_elements: n3.elements
+          }
+        else
+          nil
+        end
 
-      geographic_location = if n4 do
-        %{
-          segment_id: "N4",
-          city: Parser.get_element(n4, 1),
-          state: Parser.get_element(n4, 2),
-          postal_code: Parser.get_element(n4, 3),
-          country_code: Parser.get_element(n4, 4),
-          all_elements: n4.elements
-        }
-      else
-        nil
-      end
+      geographic_location =
+        if n4 do
+          %{
+            segment_id: "N4",
+            city: Parser.get_element(n4, 1),
+            state: Parser.get_element(n4, 2),
+            postal_code: Parser.get_element(n4, 3),
+            country_code: Parser.get_element(n4, 4),
+            all_elements: n4.elements
+          }
+        else
+          nil
+        end
 
       entity_code = Parser.get_element(nm1_85, 1)
+
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
@@ -658,12 +694,14 @@ defmodule X12Bridge.X12.Converter do
 
   defp extract_subscriber(segments) do
     # Find NM1*IL (subscriber/insured)
-    nm1_il = segments
-    |> Parser.find_segments("NM1")
-    |> Enum.find(fn seg -> Parser.get_element(seg, 1) == "IL" end)
+    nm1_il =
+      segments
+      |> Parser.find_segments("NM1")
+      |> Enum.find(fn seg -> Parser.get_element(seg, 1) == "IL" end)
 
     if nm1_il do
       entity_code = Parser.get_element(nm1_il, 1)
+
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
@@ -702,6 +740,7 @@ defmodule X12Bridge.X12.Converter do
     end)
     |> Enum.map(fn nm1 ->
       entity_code = Parser.get_element(nm1, 1)
+
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
@@ -755,11 +794,12 @@ defmodule X12Bridge.X12.Converter do
     # Find REF segments that appear before the first CLM segment (header level)
     clm_index = Enum.find_index(segments, fn seg -> seg.id == "CLM" end)
 
-    header_segments = if clm_index do
-      Enum.take(segments, clm_index)
-    else
-      segments
-    end
+    header_segments =
+      if clm_index do
+        Enum.take(segments, clm_index)
+      else
+        segments
+      end
 
     header_segments
     |> Enum.filter(fn seg -> seg.id == "REF" end)
@@ -788,10 +828,12 @@ defmodule X12Bridge.X12.Converter do
   """
   def build_from_structure(structured_data, delimiters \\ nil) do
     delimiters = delimiters || %{element: "*", sub_element: ":", segment: "~"}
+
     try do
       # OPTIMIZATION: If all_segments is available, use it for perfect reconstruction
       # This ensures we don't lose any segments during round-trip
-      if all_segments = Map.get(structured_data, :all_segments) || Map.get(structured_data, "all_segments") do
+      if all_segments =
+           Map.get(structured_data, :all_segments) || Map.get(structured_data, "all_segments") do
         if is_list(all_segments) and length(all_segments) > 0 do
           # Build from all_segments for perfect reconstruction
           segments_list =
@@ -804,11 +846,12 @@ defmodule X12Bridge.X12.Converter do
           x12_content = Enum.join(segments_list, delimiters.segment)
 
           # Add final segment terminator if not already present
-          x12_content = if String.ends_with?(x12_content, delimiters.segment) do
-            x12_content
-          else
-            x12_content <> delimiters.segment
-          end
+          x12_content =
+            if String.ends_with?(x12_content, delimiters.segment) do
+              x12_content
+            else
+              x12_content <> delimiters.segment
+            end
 
           {:ok, x12_content}
         else
@@ -826,7 +869,6 @@ defmodule X12Bridge.X12.Converter do
   # Build from semantic structure (used when all_segments not available)
   defp build_from_semantic_structure(structured_data, delimiters) do
     try do
-
       # Fallback: Build from semantic structure (may not include all segments)
       segments = []
 
@@ -836,33 +878,38 @@ defmodule X12Bridge.X12.Converter do
       segments = segments ++ build_st_segment(structured_data.transaction_set, delimiters)
 
       # Build BHT segment if present
-      segments = case get_in(structured_data, [:transaction_set, :beginning_hierarchical_transaction]) do
-        nil -> segments
-        bht -> segments ++ build_bht_segment(bht, delimiters)
-      end
+      segments =
+        case get_in(structured_data, [:transaction_set, :beginning_hierarchical_transaction]) do
+          nil -> segments
+          bht -> segments ++ build_bht_segment(bht, delimiters)
+        end
 
       # Build header references
-      segments = segments ++ build_header_references(structured_data.header_references, delimiters)
+      segments =
+        segments ++ build_header_references(structured_data.header_references, delimiters)
 
       # Build hierarchical levels
-      segments = segments ++ build_hierarchical_levels(structured_data.hierarchical_levels, delimiters)
+      segments =
+        segments ++ build_hierarchical_levels(structured_data.hierarchical_levels, delimiters)
 
       # Build entities (submitter, receiver, billing provider, subscriber)
       segments = segments ++ build_other_entities(structured_data.other_entities, delimiters)
 
       # Build billing provider if present
-      segments = if structured_data.billing_provider do
-        segments ++ build_billing_provider(structured_data.billing_provider, delimiters)
-      else
-        segments
-      end
+      segments =
+        if structured_data.billing_provider do
+          segments ++ build_billing_provider(structured_data.billing_provider, delimiters)
+        else
+          segments
+        end
 
       # Build subscriber if present
-      segments = if structured_data.subscriber do
-        segments ++ build_subscriber(structured_data.subscriber, delimiters)
-      else
-        segments
-      end
+      segments =
+        if structured_data.subscriber do
+          segments ++ build_subscriber(structured_data.subscriber, delimiters)
+        else
+          segments
+        end
 
       # Build contacts
       segments = segments ++ build_contacts(structured_data.contacts, delimiters)
@@ -871,10 +918,13 @@ defmodule X12Bridge.X12.Converter do
       segments = segments ++ build_claims(structured_data.claims, delimiters)
 
       # Calculate SE segment count (number of segments from ST to SE, inclusive)
-      segment_count = length(segments) - 2 + 2  # Exclude ISA/GS, include ST and SE itself
+      # Exclude ISA/GS, include ST and SE itself
+      segment_count = length(segments) - 2 + 2
 
       # Build trailers
-      segments = segments ++ build_se_segment(structured_data.transaction_set, segment_count, delimiters)
+      segments =
+        segments ++ build_se_segment(structured_data.transaction_set, segment_count, delimiters)
+
       segments = segments ++ build_ge_segment(structured_data.functional_group, delimiters)
       segments = segments ++ build_iea_segment(structured_data.interchange_header, delimiters)
 
@@ -882,11 +932,12 @@ defmodule X12Bridge.X12.Converter do
       x12_content = Enum.join(segments, delimiters.segment)
 
       # Add final segment terminator if not already present
-      x12_content = if String.ends_with?(x12_content, delimiters.segment) do
-        x12_content
-      else
-        x12_content <> delimiters.segment
-      end
+      x12_content =
+        if String.ends_with?(x12_content, delimiters.segment) do
+          x12_content
+        else
+          x12_content <> delimiters.segment
+        end
 
       {:ok, x12_content}
     rescue
@@ -919,6 +970,7 @@ defmodule X12Bridge.X12.Converter do
   # Private helper functions for building individual segments
 
   defp build_isa_segment(nil, _delimiters), do: []
+
   defp build_isa_segment(isa, delimiters) do
     elements = Map.get(isa, :all_elements) || Map.get(isa, "all_elements") || []
 
@@ -926,28 +978,39 @@ defmodule X12Bridge.X12.Converter do
       [build_segment_from_elements(elements, delimiters)]
     else
       # Fallback: manually construct from individual fields
-      [build_segment([
-        "ISA",
-        Map.get(isa, :authorization_info_qualifier) || Map.get(isa, "authorization_info_qualifier") || "00",
-        Map.get(isa, :authorization_info) || Map.get(isa, "authorization_info") || "          ",
-        Map.get(isa, :security_info_qualifier) || Map.get(isa, "security_info_qualifier") || "00",
-        Map.get(isa, :security_info) || Map.get(isa, "security_info") || "          ",
-        Map.get(isa, :sender_id_qualifier) || Map.get(isa, "sender_id_qualifier") || "ZZ",
-        Map.get(isa, :sender_id) || Map.get(isa, "sender_id") || "",
-        Map.get(isa, :receiver_id_qualifier) || Map.get(isa, "receiver_id_qualifier") || "ZZ",
-        Map.get(isa, :receiver_id) || Map.get(isa, "receiver_id") || "",
-        Map.get(isa, :interchange_date) || Map.get(isa, "interchange_date") || "",
-        Map.get(isa, :interchange_time) || Map.get(isa, "interchange_time") || "",
-        Map.get(isa, :standards_id) || Map.get(isa, "standards_id") || "^",
-        Map.get(isa, :version_number) || Map.get(isa, "version_number") || "00501",
-        Map.get(isa, :interchange_control_number) || Map.get(isa, "interchange_control_number") || "000000001",
-        Map.get(isa, :acknowledgment_requested) || Map.get(isa, "acknowledgment_requested") || "0",
-        Map.get(isa, :usage_indicator) || Map.get(isa, "usage_indicator") || "P"
-      ], delimiters)]
+      [
+        build_segment(
+          [
+            "ISA",
+            Map.get(isa, :authorization_info_qualifier) ||
+              Map.get(isa, "authorization_info_qualifier") || "00",
+            Map.get(isa, :authorization_info) || Map.get(isa, "authorization_info") ||
+              "          ",
+            Map.get(isa, :security_info_qualifier) || Map.get(isa, "security_info_qualifier") ||
+              "00",
+            Map.get(isa, :security_info) || Map.get(isa, "security_info") || "          ",
+            Map.get(isa, :sender_id_qualifier) || Map.get(isa, "sender_id_qualifier") || "ZZ",
+            Map.get(isa, :sender_id) || Map.get(isa, "sender_id") || "",
+            Map.get(isa, :receiver_id_qualifier) || Map.get(isa, "receiver_id_qualifier") || "ZZ",
+            Map.get(isa, :receiver_id) || Map.get(isa, "receiver_id") || "",
+            Map.get(isa, :interchange_date) || Map.get(isa, "interchange_date") || "",
+            Map.get(isa, :interchange_time) || Map.get(isa, "interchange_time") || "",
+            Map.get(isa, :standards_id) || Map.get(isa, "standards_id") || "^",
+            Map.get(isa, :version_number) || Map.get(isa, "version_number") || "00501",
+            Map.get(isa, :interchange_control_number) ||
+              Map.get(isa, "interchange_control_number") || "000000001",
+            Map.get(isa, :acknowledgment_requested) || Map.get(isa, "acknowledgment_requested") ||
+              "0",
+            Map.get(isa, :usage_indicator) || Map.get(isa, "usage_indicator") || "P"
+          ],
+          delimiters
+        )
+      ]
     end
   end
 
   defp build_gs_segment(nil, _delimiters), do: []
+
   defp build_gs_segment(gs, delimiters) do
     elements = Map.get(gs, :all_elements) || Map.get(gs, "all_elements") || []
 
@@ -959,6 +1022,7 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp build_st_segment(nil, _delimiters), do: []
+
   defp build_st_segment(st, delimiters) do
     elements = Map.get(st, :all_elements) || Map.get(st, "all_elements") || []
 
@@ -970,6 +1034,7 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp build_bht_segment(nil, _delimiters), do: []
+
   defp build_bht_segment(bht, delimiters) do
     elements = Map.get(bht, :all_elements) || Map.get(bht, "all_elements") || []
 
@@ -984,38 +1049,42 @@ defmodule X12Bridge.X12.Converter do
     # SE segment: SE*count*transaction_control_number~
     transaction_control =
       get_in(st, [:transaction_control_number]) ||
-      get_in(st, ["transaction_control_number"]) ||
-      "0001"
+        get_in(st, ["transaction_control_number"]) ||
+        "0001"
 
     [build_segment(["SE", to_string(segment_count), transaction_control], delimiters)]
   end
 
   defp build_ge_segment(nil, _delimiters), do: []
+
   defp build_ge_segment(gs, delimiters) do
     # GE segment: GE*1*group_control_number~
     group_control =
       Map.get(gs, :group_control_number) ||
-      Map.get(gs, "group_control_number") ||
-      "1"
+        Map.get(gs, "group_control_number") ||
+        "1"
 
     [build_segment(["GE", "1", group_control], delimiters)]
   end
 
   defp build_iea_segment(nil, _delimiters), do: []
+
   defp build_iea_segment(isa, delimiters) do
     # IEA segment: IEA*1*interchange_control_number~
     interchange_control =
       Map.get(isa, :interchange_control_number) ||
-      Map.get(isa, "interchange_control_number") ||
-      "000000001"
+        Map.get(isa, "interchange_control_number") ||
+        "000000001"
 
     [build_segment(["IEA", "1", interchange_control], delimiters)]
   end
 
   defp build_header_references(nil, _delimiters), do: []
+
   defp build_header_references(refs, delimiters) when is_list(refs) do
     Enum.flat_map(refs, fn ref ->
       elements = Map.get(ref, :all_elements) || Map.get(ref, "all_elements") || []
+
       if length(elements) > 0 do
         [build_segment_from_elements(elements, delimiters)]
       else
@@ -1023,12 +1092,15 @@ defmodule X12Bridge.X12.Converter do
       end
     end)
   end
+
   defp build_header_references(_, _delimiters), do: []
 
   defp build_hierarchical_levels(nil, _delimiters), do: []
+
   defp build_hierarchical_levels(levels, delimiters) when is_list(levels) do
     Enum.flat_map(levels, fn level ->
       elements = Map.get(level, :all_elements) || Map.get(level, "all_elements") || []
+
       if length(elements) > 0 do
         [build_segment_from_elements(elements, delimiters)]
       else
@@ -1036,12 +1108,15 @@ defmodule X12Bridge.X12.Converter do
       end
     end)
   end
+
   defp build_hierarchical_levels(_, _delimiters), do: []
 
   defp build_other_entities(nil, _delimiters), do: []
+
   defp build_other_entities(entities, delimiters) when is_list(entities) do
     Enum.flat_map(entities, fn entity ->
       elements = Map.get(entity, :all_elements) || Map.get(entity, "all_elements") || []
+
       if length(elements) > 0 do
         [build_segment_from_elements(elements, delimiters)]
       else
@@ -1049,50 +1124,65 @@ defmodule X12Bridge.X12.Converter do
       end
     end)
   end
+
   defp build_other_entities(_, _delimiters), do: []
 
   defp build_billing_provider(nil, _delimiters), do: []
+
   defp build_billing_provider(provider, delimiters) do
     segments = []
 
     # NM1 segment
     elements = Map.get(provider, :all_elements) || Map.get(provider, "all_elements") || []
-    segments = if length(elements) > 0 do
-      segments ++ [build_segment_from_elements(elements, delimiters)]
-    else
-      segments
-    end
+
+    segments =
+      if length(elements) > 0 do
+        segments ++ [build_segment_from_elements(elements, delimiters)]
+      else
+        segments
+      end
 
     # N3 segment (address)
-    segments = case Map.get(provider, :address) || Map.get(provider, "address") do
-      nil -> segments
-      address ->
-        addr_elements = Map.get(address, :all_elements) || Map.get(address, "all_elements") || []
-        if length(addr_elements) > 0 do
-          segments ++ [build_segment_from_elements(addr_elements, delimiters)]
-        else
+    segments =
+      case Map.get(provider, :address) || Map.get(provider, "address") do
+        nil ->
           segments
-        end
-    end
+
+        address ->
+          addr_elements =
+            Map.get(address, :all_elements) || Map.get(address, "all_elements") || []
+
+          if length(addr_elements) > 0 do
+            segments ++ [build_segment_from_elements(addr_elements, delimiters)]
+          else
+            segments
+          end
+      end
 
     # N4 segment (geographic location)
-    segments = case Map.get(provider, :geographic_location) || Map.get(provider, "geographic_location") do
-      nil -> segments
-      geo ->
-        geo_elements = Map.get(geo, :all_elements) || Map.get(geo, "all_elements") || []
-        if length(geo_elements) > 0 do
-          segments ++ [build_segment_from_elements(geo_elements, delimiters)]
-        else
+    segments =
+      case Map.get(provider, :geographic_location) || Map.get(provider, "geographic_location") do
+        nil ->
           segments
-        end
-    end
+
+        geo ->
+          geo_elements = Map.get(geo, :all_elements) || Map.get(geo, "all_elements") || []
+
+          if length(geo_elements) > 0 do
+            segments ++ [build_segment_from_elements(geo_elements, delimiters)]
+          else
+            segments
+          end
+      end
 
     segments
   end
 
   defp build_subscriber(nil, _delimiters), do: []
+
   defp build_subscriber(subscriber, delimiters) do
     elements = Map.get(subscriber, :all_elements) || Map.get(subscriber, "all_elements") || []
+
     if length(elements) > 0 do
       [build_segment_from_elements(elements, delimiters)]
     else
@@ -1101,9 +1191,11 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp build_contacts(nil, _delimiters), do: []
+
   defp build_contacts(contacts, delimiters) when is_list(contacts) do
     Enum.flat_map(contacts, fn contact ->
       elements = Map.get(contact, :all_elements) || Map.get(contact, "all_elements") || []
+
       if length(elements) > 0 do
         [build_segment_from_elements(elements, delimiters)]
       else
@@ -1111,12 +1203,15 @@ defmodule X12Bridge.X12.Converter do
       end
     end)
   end
+
   defp build_contacts(_, _delimiters), do: []
 
   defp build_claims(nil, _delimiters), do: []
+
   defp build_claims(claims, delimiters) when is_list(claims) do
     Enum.flat_map(claims, fn claim -> build_claim(claim, delimiters) end)
   end
+
   defp build_claims(_, _delimiters), do: []
 
   defp build_claim(claim, delimiters) do
@@ -1124,23 +1219,30 @@ defmodule X12Bridge.X12.Converter do
 
     # CLM segment
     clm_elements = Map.get(claim, :all_elements) || Map.get(claim, "all_elements") || []
-    segments = if length(clm_elements) > 0 do
-      segments ++ [build_segment_from_elements(clm_elements, delimiters)]
-    else
-      segments
-    end
+
+    segments =
+      if length(clm_elements) > 0 do
+        segments ++ [build_segment_from_elements(clm_elements, delimiters)]
+      else
+        segments
+      end
 
     # Patient NM1 if present
-    segments = case Map.get(claim, :patient) || Map.get(claim, "patient") do
-      nil -> segments
-      patient ->
-        patient_elements = Map.get(patient, :all_elements) || Map.get(patient, "all_elements") || []
-        if length(patient_elements) > 0 do
-          segments ++ [build_segment_from_elements(patient_elements, delimiters)]
-        else
+    segments =
+      case Map.get(claim, :patient) || Map.get(claim, "patient") do
+        nil ->
           segments
-        end
-    end
+
+        patient ->
+          patient_elements =
+            Map.get(patient, :all_elements) || Map.get(patient, "all_elements") || []
+
+          if length(patient_elements) > 0 do
+            segments ++ [build_segment_from_elements(patient_elements, delimiters)]
+          else
+            segments
+          end
+      end
 
     # DTP segments (dates)
     dates = Map.get(claim, :dates) || Map.get(claim, "dates") || []
@@ -1151,16 +1253,20 @@ defmodule X12Bridge.X12.Converter do
     segments = segments ++ build_references(refs, delimiters)
 
     # HI segment (diagnosis codes)
-    segments = case Map.get(claim, :diagnosis_codes) || Map.get(claim, "diagnosis_codes") do
-      nil -> segments
-      diag ->
-        diag_elements = Map.get(diag, :all_elements) || Map.get(diag, "all_elements") || []
-        if length(diag_elements) > 0 do
-          segments ++ [build_segment_from_elements(diag_elements, delimiters)]
-        else
+    segments =
+      case Map.get(claim, :diagnosis_codes) || Map.get(claim, "diagnosis_codes") do
+        nil ->
           segments
-        end
-    end
+
+        diag ->
+          diag_elements = Map.get(diag, :all_elements) || Map.get(diag, "all_elements") || []
+
+          if length(diag_elements) > 0 do
+            segments ++ [build_segment_from_elements(diag_elements, delimiters)]
+          else
+            segments
+          end
+      end
 
     # Service lines
     service_lines = Map.get(claim, :service_lines) || Map.get(claim, "service_lines") || []
@@ -1170,9 +1276,11 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp build_dates(nil, _delimiters), do: []
+
   defp build_dates(dates, delimiters) when is_list(dates) do
     Enum.flat_map(dates, fn date ->
       elements = Map.get(date, :all_elements) || Map.get(date, "all_elements") || []
+
       if length(elements) > 0 do
         [build_segment_from_elements(elements, delimiters)]
       else
@@ -1180,12 +1288,15 @@ defmodule X12Bridge.X12.Converter do
       end
     end)
   end
+
   defp build_dates(_, _delimiters), do: []
 
   defp build_references(nil, _delimiters), do: []
+
   defp build_references(refs, delimiters) when is_list(refs) do
     Enum.flat_map(refs, fn ref ->
       elements = Map.get(ref, :all_elements) || Map.get(ref, "all_elements") || []
+
       if length(elements) > 0 do
         [build_segment_from_elements(elements, delimiters)]
       else
@@ -1193,12 +1304,15 @@ defmodule X12Bridge.X12.Converter do
       end
     end)
   end
+
   defp build_references(_, _delimiters), do: []
 
   defp build_service_lines(nil, _delimiters), do: []
+
   defp build_service_lines(lines, delimiters) when is_list(lines) do
     Enum.flat_map(lines, fn line -> build_service_line(line, delimiters) end)
   end
+
   defp build_service_lines(_, _delimiters), do: []
 
   defp build_service_line(line, delimiters) do
@@ -1206,23 +1320,30 @@ defmodule X12Bridge.X12.Converter do
 
     # LX segment if present
     lx_elements = Map.get(line, :all_elements) || Map.get(line, "all_elements") || []
-    segments = if length(lx_elements) > 0 do
-      segments ++ [build_segment_from_elements(lx_elements, delimiters)]
-    else
-      segments
-    end
+
+    segments =
+      if length(lx_elements) > 0 do
+        segments ++ [build_segment_from_elements(lx_elements, delimiters)]
+      else
+        segments
+      end
 
     # Service info (SV1/SV2/SV3)
-    segments = case Map.get(line, :service_info) || Map.get(line, "service_info") do
-      nil -> segments
-      service_info ->
-        sv_elements = Map.get(service_info, :all_elements) || Map.get(service_info, "all_elements") || []
-        if length(sv_elements) > 0 do
-          segments ++ [build_segment_from_elements(sv_elements, delimiters)]
-        else
+    segments =
+      case Map.get(line, :service_info) || Map.get(line, "service_info") do
+        nil ->
           segments
-        end
-    end
+
+        service_info ->
+          sv_elements =
+            Map.get(service_info, :all_elements) || Map.get(service_info, "all_elements") || []
+
+          if length(sv_elements) > 0 do
+            segments ++ [build_segment_from_elements(sv_elements, delimiters)]
+          else
+            segments
+          end
+      end
 
     # DTP segments (dates) for service line
     dates = Map.get(line, :dates) || Map.get(line, "dates") || []
@@ -1307,7 +1428,8 @@ defmodule X12Bridge.X12.Converter do
       "PR" -> "Payer"
       "QC" -> "Patient"
       "X3" -> "Dependent"
-      _ -> code  # Return code if unknown
+      # Return code if unknown
+      _ -> code
     end
   end
 

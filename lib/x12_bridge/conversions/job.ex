@@ -2,6 +2,8 @@ defmodule X12Bridge.Conversions.Job do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias X12Bridge.JobStatus
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -33,9 +35,6 @@ defmodule X12Bridge.Conversions.Job do
     timestamps()
   end
 
-  # Valid job statuses for the multi-stage pipeline
-  @valid_statuses ~w(uploaded verifying verified failed_verification translating translated failed_translation pending processing completed failed)
-
   @doc false
   def changeset(job, attrs) do
     job
@@ -46,6 +45,6 @@ defmodule X12Bridge.Conversions.Job do
       :roundtrip_valid, :roundtrip_diff, :roundtrip_error
     ])
     |> validate_required([:original_filename])
-    |> validate_inclusion(:status, @valid_statuses)
+    |> validate_inclusion(:status, JobStatus.list_all_strings())
   end
 end

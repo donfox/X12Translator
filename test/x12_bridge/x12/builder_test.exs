@@ -1,7 +1,7 @@
 defmodule X12Bridge.X12.BuilderTest do
   use ExUnit.Case, async: true
 
-  alias X12Bridge.X12.{Builder, Parser, Converter}
+  alias X12Bridge.X12.{Parser, Converter}
 
   @fixtures_dir "test/fixtures/automated_test_data"
 
@@ -14,7 +14,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, structured_data} = Converter.build_structure(segments, delimiters)
 
       # Build X12 from structure
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Verify it's valid X12
       assert String.starts_with?(rebuilt_x12, "ISA*")
@@ -34,7 +34,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, %{delimiters: delimiters, segments: segments}} = Parser.parse(x12_content)
       {:ok, structured_data} = Converter.build_structure(segments, delimiters)
 
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       assert String.starts_with?(rebuilt_x12, "ISA*")
       assert String.contains?(rebuilt_x12, "SV2*")  # Institutional service segment
@@ -46,7 +46,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, %{delimiters: delimiters, segments: segments}} = Parser.parse(x12_content)
       {:ok, structured_data} = Converter.build_structure(segments, delimiters)
 
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       assert String.starts_with?(rebuilt_x12, "ISA*")
       assert String.contains?(rebuilt_x12, "SV3*")  # Dental service segment
@@ -58,7 +58,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, %{delimiters: delimiters, segments: segments}} = Parser.parse(x12_content)
       {:ok, structured_data} = Converter.build_structure(segments, delimiters)
 
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Count segments
       rebuilt_segments = String.split(rebuilt_x12, "~", trim: true)
@@ -85,7 +85,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, %{delimiters: delimiters, segments: segments}} = Parser.parse(x12_content)
       {:ok, structured_data} = Converter.build_structure(segments, delimiters)
 
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Verify CLM segments (claims)
       clm_count = rebuilt_x12 |> String.split("~", trim: true) |> Enum.count(&String.starts_with?(&1, "CLM*"))
@@ -102,7 +102,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, %{delimiters: delimiters, segments: segments}} = Parser.parse(x12_content)
       {:ok, structured_data} = Converter.build_structure(segments, delimiters)
 
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Should have CLM segments (file name is misleading, only has 1 claim but multiple service lines)
       clm_count = rebuilt_x12 |> String.split("~", trim: true) |> Enum.count(&String.starts_with?(&1, "CLM*"))
@@ -121,7 +121,7 @@ defmodule X12Bridge.X12.BuilderTest do
       {:ok, json_string} = Converter.convert_content(x12_content)
 
       # Build X12 from JSON
-      {:ok, rebuilt_x12} = Builder.build_from_json(json_string)
+      {:ok, rebuilt_x12} = Converter.build_from_json(json_string)
 
       # Verify it's valid X12
       assert String.starts_with?(rebuilt_x12, "ISA*")
@@ -131,7 +131,7 @@ defmodule X12Bridge.X12.BuilderTest do
     test "returns error for invalid JSON" do
       invalid_json = "{not valid json"
 
-      result = Builder.build_from_json(invalid_json)
+      result = Converter.build_from_json(invalid_json)
 
       assert {:error, _reason} = result
     end
@@ -144,7 +144,7 @@ defmodule X12Bridge.X12.BuilderTest do
       # Round-trip: X12 → JSON → X12
       {:ok, %{delimiters: delimiters, segments: original_segments}} = Parser.parse(x12_content)
       {:ok, structured_data} = Converter.build_structure(original_segments, delimiters)
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Parse rebuilt X12
       {:ok, %{segments: rebuilt_segments}} = Parser.parse(rebuilt_x12)
@@ -164,7 +164,7 @@ defmodule X12Bridge.X12.BuilderTest do
 
       # Round-trip
       {:ok, structured_data} = Converter.build_structure(original_segments, delimiters)
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Extract claim data from rebuilt
       {:ok, %{segments: rebuilt_segments}} = Parser.parse(rebuilt_x12)
@@ -187,7 +187,7 @@ defmodule X12Bridge.X12.BuilderTest do
 
       # Round-trip
       {:ok, structured_data} = Converter.build_structure(original_segments, delimiters)
-      {:ok, rebuilt_x12} = Builder.build_from_structure(structured_data, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(structured_data, delimiters)
 
       # Extract billing provider from rebuilt
       {:ok, %{segments: rebuilt_segments}} = Parser.parse(rebuilt_x12)
@@ -230,7 +230,7 @@ defmodule X12Bridge.X12.BuilderTest do
 
       delimiters = %Parser.Delimiters{element: "*", sub_element: ":", segment: "~"}
 
-      {:ok, rebuilt_x12} = Builder.build_from_structure(minimal_structure, delimiters)
+      {:ok, rebuilt_x12} = Converter.build_from_structure(minimal_structure, delimiters)
 
       # Should produce valid envelope
       assert String.starts_with?(rebuilt_x12, "ISA*")

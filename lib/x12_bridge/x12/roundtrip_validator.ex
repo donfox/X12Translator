@@ -8,13 +8,13 @@ defmodule X12Bridge.X12.RoundtripValidator do
 
   Validation Process:
   1. Parse original X12 → JSON
-  2. Rebuild X12 from JSON
+  2. Rebuild X12 from JSON (using Converter.build_from_structure/2)
   3. Normalize both X12 files (whitespace)
   4. Compare segment by segment
   5. Report differences if any
   """
 
-  alias X12Bridge.X12.{Parser, Converter, Builder}
+  alias X12Bridge.X12.{Parser, Converter}
 
   defmodule ValidationResult do
     @moduledoc "Result of round-trip validation"
@@ -46,8 +46,8 @@ defmodule X12Bridge.X12.RoundtripValidator do
           # Note: build_structure always returns {:ok, ...}
           {:ok, structured_data} = Converter.build_structure(original_segments, delimiters)
 
-          # Step 3: Rebuild X12 from structured data
-          case Builder.build_from_structure(structured_data, delimiters) do
+          # Step 3: Rebuild X12 from structured data (using Converter.build_from_structure)
+          case Converter.build_from_structure(structured_data, delimiters) do
             {:ok, rebuilt_x12} ->
               # Step 4: Normalize and compare
               compare_x12(x12_content, rebuilt_x12, delimiters)

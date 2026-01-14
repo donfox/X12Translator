@@ -21,6 +21,8 @@ open http://localhost:4000/converter
 
 That's it! Load a sample file and convert to JSON.
 
+**Note:** `mix setup` checks for environment variable conflicts automatically. See [SETUP_TROUBLESHOOTING.md](SETUP_TROUBLESHOOTING.md) if you encounter issues.
+
 ---
 
 ## What X12Bridge Does

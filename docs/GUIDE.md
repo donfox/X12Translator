@@ -118,14 +118,19 @@ Get up and running in 3 commands:
 git clone <repository-url>
 cd X12Bridge
 
-# 2. Install dependencies and setup database
+# 2. (Optional but recommended) Validate your setup
+bash priv/scripts/check_setup.sh
+
+# 3. Install dependencies and setup database
 mix setup
 
-# 3. Start the Phoenix server
+# 4. Start the Phoenix server
 mix phx.server
 ```
 
 Visit [http://localhost:4000](http://localhost:4000) in your browser.
+
+**Note:** `mix setup` automatically checks for environment variable conflicts. See [SETUP_TROUBLESHOOTING.md](../SETUP_TROUBLESHOOTING.md) if you encounter issues.
 
 ---
 
@@ -601,23 +606,23 @@ For command-line batch processing, see [BATCH_PROCESSING.md](BATCH_PROCESSING.md
 
 ---
 
-### "Connection refused" error when connecting to database
+### Database Connection Errors
 
-**Problem:** PostgreSQL is not running.
+**Common issues:** Connection refused, wrong host/port, environment variable conflicts, rebar3 permissions
 
-**Solution:**
-
-Start PostgreSQL:
+**Quick fix:**
 ```bash
-# macOS
-brew services start postgresql@14
+# Check configuration
+bash priv/scripts/check_setup.sh
 
-# Linux
-sudo systemctl start postgresql
-
-# Check status
-psql -U postgres -c "SELECT version();"
+# Or see detailed troubleshooting
 ```
+
+See [SETUP_TROUBLESHOOTING.md](../SETUP_TROUBLESHOOTING.md) for detailed fixes for:
+- Environment variable conflicts (PGHOST, PGPORT)
+- rebar3 permission errors
+- PostgreSQL not running
+- Custom database server configuration
 
 ---
 

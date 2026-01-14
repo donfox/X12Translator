@@ -6,7 +6,7 @@ defmodule X12Bridge.Conversions do
   import Ecto.Query
   alias X12Bridge.Repo
   alias X12Bridge.Conversions.{Batch, Job}
-  alias X12Bridge.X12.{Converter, RoundtripValidator}
+  alias X12Bridge.X12.{Converter, RoundtripValidator, Verifier}
 
   ## Batch functions
 
@@ -238,6 +238,221 @@ defmodule X12Bridge.Conversions do
     )
 
     {:ok, batch}
+  end
+
+  @doc """
+  Verifies all jobs in a batch (Stage 1: Verification).
+
+  This runs lightweight X12 structure validation on all jobs,
+  without performing full translation. Verification is FREE.
+
+  Updates job status to either 'verified' or 'failed_verification'.
+  """
+  def verify_batch_sync(batch_id, uploaded_files) do
+    batch = get_batch!(batch_id)
+    update_batch(batch, %{status: "verifying"})
+
+    # Verify each file
+    Enum.each(uploaded_files, fn {job_id, file_content} ->
+      job = get_job!(job_id)
+      update_job(job, %{status: "verifying"})
+
+      # Run verification
+      verification_result = Verifier.verify(file_content)
+
+      # Update job based on verification result
+      if verification_result.valid? do
+        update_job(job, %{
+          status: "verified",
+          verification_result: verification_result,
+          verification_error: nil,
+          verified_at: DateTime.utc_now(),
+          claim_count: verification_result.claim_count
+        })
+
+        # Broadcast success
+        Phoenix.PubSub.broadcast(
+          X12Bridge.PubSub,
+          "batch:#{batch_id}",
+          {:job_verified, job_id}
+        )
+      else
+        # Format error message
+        error_message = Enum.join(verification_result.errors, "; ")
+
+        update_job(job, %{
+          status: "failed_verification",
+          verification_result: verification_result,
+          verification_error: error_message,
+          verified_at: DateTime.utc_now(),
+          claim_count: 0
+        })
+
+        # Broadcast failure
+        Phoenix.PubSub.broadcast(
+          X12Bridge.PubSub,
+          "batch:#{batch_id}",
+          {:job_verification_failed, job_id, error_message}
+        )
+      end
+    end)
+
+    # Update batch with verification results
+    verified_count = count_jobs_by_status(batch_id, "verified")
+    failed_verification_count = count_jobs_by_status(batch_id, "failed_verification")
+
+    # Calculate total claims from verified jobs
+    total_claims = Job
+    |> where([j], j.batch_id == ^batch_id and j.status == "verified")
+    |> select([j], sum(j.claim_count))
+    |> Repo.one() || 0
+
+    update_batch(batch, %{
+      status: "verified",
+      verified_files: verified_count,
+      failed_verification_files: failed_verification_count,
+      total_claims: total_claims
+    })
+
+    # Broadcast batch verification complete
+    Phoenix.PubSub.broadcast(
+      X12Bridge.PubSub,
+      "batch:#{batch_id}",
+      {:batch_verified, batch_id, verified_count, failed_verification_count, total_claims}
+    )
+
+    {:ok, get_batch!(batch_id)}
+  end
+
+  @doc """
+  Translates all VERIFIED jobs in a batch (Stage 2: Translation).
+
+  This runs full X12 → JSON conversion + round-trip validation.
+  Only jobs with status 'verified' are processed.
+  Translation is BILLED per claim.
+
+  Updates job status to either 'translated' or 'failed_translation'.
+  """
+  def translate_batch_sync(batch_id, uploaded_files) do
+    batch = get_batch!(batch_id)
+    update_batch(batch, %{status: "translating"})
+
+    # Get only verified jobs
+    verified_jobs = Job
+    |> where([j], j.batch_id == ^batch_id and j.status == "verified")
+    |> Repo.all()
+
+    # Translate each verified file
+    Enum.each(verified_jobs, fn job ->
+      # Find the file content for this job
+      file_content = Map.get(uploaded_files, job.id)
+
+      if file_content do
+        update_job(job, %{status: "translating"})
+
+        start_time = System.monotonic_time(:millisecond)
+
+        # STEP 1: Perform round-trip validation FIRST
+        validation_result = RoundtripValidator.validate(file_content)
+
+        if validation_result.valid? do
+          # STEP 2: Round-trip validation passed, proceed with conversion
+          case Converter.convert_content(file_content) do
+            {:ok, json} ->
+              processing_time = System.monotonic_time(:millisecond) - start_time
+
+              update_job(job, %{
+                status: "translated",
+                json_result: json,
+                processing_time_ms: processing_time,
+                roundtrip_valid: true,
+                roundtrip_diff: nil,
+                roundtrip_error: nil,
+                translated_at: DateTime.utc_now(),
+                claims_charged: job.claim_count  # Charge for successful translation
+              })
+
+              # Broadcast success
+              Phoenix.PubSub.broadcast(
+                X12Bridge.PubSub,
+                "batch:#{batch_id}",
+                {:job_translated, job.id}
+              )
+
+            {:error, reason} ->
+              processing_time = System.monotonic_time(:millisecond) - start_time
+
+              update_job(job, %{
+                status: "failed_translation",
+                error_message: inspect(reason),
+                processing_time_ms: processing_time,
+                roundtrip_valid: false,
+                roundtrip_error: "Conversion failed: #{inspect(reason)}",
+                translated_at: DateTime.utc_now(),
+                claims_charged: 0  # No charge for failed translation
+              })
+
+              # Broadcast failure
+              Phoenix.PubSub.broadcast(
+                X12Bridge.PubSub,
+                "batch:#{batch_id}",
+                {:job_translation_failed, job.id, inspect(reason)}
+              )
+          end
+        else
+          # STEP 3: Round-trip validation FAILED - block conversion
+          processing_time = System.monotonic_time(:millisecond) - start_time
+          formatted_diff = RoundtripValidator.format_result(validation_result)
+
+          update_job(job, %{
+            status: "failed_translation",
+            error_message: "Round-trip validation failed",
+            processing_time_ms: processing_time,
+            roundtrip_valid: false,
+            roundtrip_diff: formatted_diff,
+            roundtrip_error: validation_result.error_message || "X12 reconstruction differs from original",
+            translated_at: DateTime.utc_now(),
+            claims_charged: 0  # No charge for failed translation
+          })
+
+          # Broadcast failure
+          Phoenix.PubSub.broadcast(
+            X12Bridge.PubSub,
+            "batch:#{batch_id}",
+            {:job_translation_failed, job.id, "Round-trip validation failed"}
+          )
+        end
+      end
+    end)
+
+    # Update batch with translation results
+    translated_count = count_jobs_by_status(batch_id, "translated")
+    failed_translation_count = count_jobs_by_status(batch_id, "failed_translation")
+
+    # Calculate total claims charged (only for successful translations)
+    total_claims_charged = Job
+    |> where([j], j.batch_id == ^batch_id and j.status == "translated")
+    |> select([j], sum(j.claims_charged))
+    |> Repo.one() || 0
+
+    update_batch(batch, %{
+      status: "translated",
+      translated_files: translated_count,
+      failed_translation_files: failed_translation_count,
+      total_claims_charged: total_claims_charged,
+      # Also update legacy fields for backward compatibility
+      completed_files: translated_count,
+      failed_files: failed_translation_count
+    })
+
+    # Broadcast batch translation complete
+    Phoenix.PubSub.broadcast(
+      X12Bridge.PubSub,
+      "batch:#{batch_id}",
+      {:batch_translated, batch_id, translated_count, failed_translation_count, total_claims_charged}
+    )
+
+    {:ok, get_batch!(batch_id)}
   end
 
   defp count_jobs_by_status(batch_id, status) do

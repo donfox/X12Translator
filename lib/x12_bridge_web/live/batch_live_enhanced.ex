@@ -32,6 +32,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:remote_status, nil)  # nil, :processing, :completed, :error
      |> assign(:remote_result, nil)
      |> assign(:processing_status, nil)  # Track active processing
+     |> assign(:uploaded_files, %{})  # Store uploaded file contents for verification/translation
      |> allow_upload(:batch_files,
          accept: [".x12", ".edi", ".txt", ".zip"],
          max_entries: 50,
@@ -146,36 +147,73 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
       {:ok, batch} = Conversions.create_batch(%{
         name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
-        total_files: length(all_files)
+        total_files: length(all_files),
+        status: "uploaded"
       })
 
       Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
 
-      # Create jobs and prepare files for processing
+      # Create jobs and store file contents
       files_to_process =
         Enum.map(all_files, fn {filename, content, file_size} ->
           {:ok, job} = Conversions.create_job(%{
             batch_id: batch.id,
             original_filename: filename,
             file_size: file_size,
-            status: "pending"
+            status: "uploaded",
+            x12_content: content
           })
 
           {job.id, content}
         end)
-
-      Task.start(fn ->
-        Conversions.process_batch_sync(batch.id, files_to_process)
-      end)
+        |> Map.new()
 
       batches = Conversions.list_batches(limit: 10)
 
       {:noreply,
        socket
        |> assign(:batches, batches)
-       |> assign(:current_batch, batch)
-       |> assign(:processing_status, :active)  # Mark as actively processing
-       |> put_flash(:info, "Processing #{batch.total_files} files...")}
+       |> assign(:current_batch, Conversions.get_batch!(batch.id))
+       |> assign(:uploaded_files, files_to_process)
+       |> put_flash(:info, "Staged #{batch.total_files} files. Click 'Verify' to check X12 structure.")}
+    end
+  end
+
+  @impl true
+  def handle_event("verify_batch", _params, socket) do
+    batch = socket.assigns.current_batch
+    uploaded_files = socket.assigns.uploaded_files
+
+    if batch && map_size(uploaded_files) > 0 do
+      Task.start(fn ->
+        Conversions.verify_batch_sync(batch.id, uploaded_files)
+      end)
+
+      {:noreply,
+       socket
+       |> assign(:processing_status, :verifying)
+       |> put_flash(:info, "Verifying #{batch.total_files} files...")}
+    else
+      {:noreply, put_flash(socket, :error, "No files to verify")}
+    end
+  end
+
+  @impl true
+  def handle_event("translate_batch", _params, socket) do
+    batch = socket.assigns.current_batch
+    uploaded_files = socket.assigns.uploaded_files
+
+    if batch && map_size(uploaded_files) > 0 do
+      Task.start(fn ->
+        Conversions.translate_batch_sync(batch.id, uploaded_files)
+      end)
+
+      {:noreply,
+       socket
+       |> assign(:processing_status, :translating)
+       |> put_flash(:info, "Translating verified files...")}
+    else
+      {:noreply, put_flash(socket, :error, "No verified files to translate")}
     end
   end
 
@@ -332,6 +370,114 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      socket
      |> assign(:remote_status, :error)
      |> put_flash(:error, error_message)}
+  end
+
+  # === VERIFICATION PUBSUB HANDLERS ===
+
+  @impl true
+  def handle_info({:job_verified, _job_id}, socket) do
+    batch = if socket.assigns.current_batch do
+      Conversions.get_batch!(socket.assigns.current_batch.id)
+    else
+      nil
+    end
+
+    batches = Conversions.list_batches(limit: 10)
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, batch)}
+  end
+
+  @impl true
+  def handle_info({:job_verification_failed, _job_id, _error_message}, socket) do
+    batch = if socket.assigns.current_batch do
+      Conversions.get_batch!(socket.assigns.current_batch.id)
+    else
+      nil
+    end
+
+    batches = Conversions.list_batches(limit: 10)
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, batch)}
+  end
+
+  @impl true
+  def handle_info({:batch_verified, batch_id, verified_count, failed_count, total_claims}, socket) do
+    batch = Conversions.get_batch!(batch_id)
+    batches = Conversions.list_batches(limit: 10)
+
+    message = if failed_count > 0 do
+      "Verification complete! #{verified_count} passed (#{total_claims} claims), #{failed_count} failed"
+    else
+      "Verification complete! All #{verified_count} files passed (#{total_claims} claims total)"
+    end
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, batch)
+     |> assign(:processing_status, :verified)
+     |> put_flash(:info, message)}
+  end
+
+  # === TRANSLATION PUBSUB HANDLERS ===
+
+  @impl true
+  def handle_info({:job_translated, _job_id}, socket) do
+    batch = if socket.assigns.current_batch do
+      Conversions.get_batch!(socket.assigns.current_batch.id)
+    else
+      nil
+    end
+
+    batches = Conversions.list_batches(limit: 10)
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, batch)}
+  end
+
+  @impl true
+  def handle_info({:job_translation_failed, _job_id, _error_message}, socket) do
+    batch = if socket.assigns.current_batch do
+      Conversions.get_batch!(socket.assigns.current_batch.id)
+    else
+      nil
+    end
+
+    batches = Conversions.list_batches(limit: 10)
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, batch)}
+  end
+
+  @impl true
+  def handle_info({:batch_translated, batch_id, translated_count, failed_count, claims_charged}, socket) do
+    batch = Conversions.get_batch!(batch_id)
+    batches = Conversions.list_batches(limit: 10)
+
+    cost = claims_charged * 0.10  # $0.10 per claim
+
+    message = if failed_count > 0 do
+      "Translation complete! #{translated_count} succeeded, #{failed_count} failed. Cost: $#{:erlang.float_to_binary(cost, decimals: 2)}"
+    else
+      "Translation complete! All #{translated_count} files succeeded. Cost: $#{:erlang.float_to_binary(cost, decimals: 2)}"
+    end
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:current_batch, batch)
+     |> assign(:processing_status, :translated)
+     |> put_flash(:info, message)}
   end
 
   # === RENDER ===
@@ -523,13 +669,150 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 <%= if length(@uploads.batch_files.entries) > 0 do %>
                   <button
                     type="submit"
-                    class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                    class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                   >
-                    Process <%= length(@uploads.batch_files.entries) %> Files
+                    Stage <%= length(@uploads.batch_files.entries) %> Files for Verification
                   </button>
                 <% end %>
               </form>
           </div>
+
+          <!-- TWO-STAGE PROCESSING PANEL (Verify & Translate) -->
+          <%= if @current_batch && @current_batch.status in ["uploaded", "verifying", "verified", "translating", "translated"] do %>
+            <div class="mb-8 bg-white shadow rounded-lg p-6 border-2 border-blue-200">
+              <div class="mb-4">
+                <h2 class="text-xl font-semibold text-gray-900">Processing: <%= @current_batch.name %></h2>
+                <p class="text-sm text-gray-500"><%= @current_batch.total_files %> files staged</p>
+              </div>
+
+              <!-- TWO BUTTONS SIDE-BY-SIDE -->
+              <div class="flex gap-4 mb-6">
+                <!-- STAGE 1: VERIFY BUTTON -->
+                <div class="flex-1">
+                  <%= if @current_batch.status == "uploaded" do %>
+                    <button
+                      phx-click="verify_batch"
+                      class="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold shadow-lg transition-all"
+                    >
+                      <div class="text-lg">🔍 Stage 1: Verify Files</div>
+                      <div class="text-xs mt-1 opacity-90">FREE - Structure Check</div>
+                    </button>
+                  <% else %>
+                    <button
+                      disabled
+                      class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
+                    >
+                      <div class="text-lg">✓ Stage 1: Verified</div>
+                      <div class="text-xs mt-1"><%= @current_batch.verified_files %> files, <%= @current_batch.total_claims %> claims</div>
+                    </button>
+                  <% end %>
+                </div>
+
+                <!-- STAGE 2: TRANSLATE BUTTON -->
+                <div class="flex-1">
+                  <%= cond do %>
+                    <% @current_batch.status == "verified" -> %>
+                      <button
+                        phx-click="translate_batch"
+                        class="w-full px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-lg transition-all animate-pulse"
+                      >
+                        <div class="text-lg">🚀 Stage 2: Translate Files</div>
+                        <div class="text-xs mt-1">Cost: $<%= :erlang.float_to_binary(@current_batch.total_claims * 0.10, decimals: 2) %> (<%= @current_batch.total_claims %> claims)</div>
+                      </button>
+
+                    <% @current_batch.status == "translated" -> %>
+                      <button
+                        disabled
+                        class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
+                      >
+                        <div class="text-lg">✓ Stage 2: Translated</div>
+                        <div class="text-xs mt-1"><%= @current_batch.translated_files %> files, <%= @current_batch.total_claims_charged %> claims charged</div>
+                      </button>
+
+                    <% true -> %>
+                      <button
+                        disabled
+                        class="w-full px-6 py-4 bg-gray-300 text-gray-500 rounded-lg font-semibold shadow cursor-not-allowed opacity-50"
+                      >
+                        <div class="text-lg">🔒 Stage 2: Translate Files</div>
+                        <div class="text-xs mt-1">
+                          <%= if @current_batch.status == "uploaded" do %>
+                            Complete Stage 1 first
+                          <% else %>
+                            <%= if @current_batch.status == "verifying", do: "Verifying...", else: "Translating..." %>
+                          <% end %>
+                        </div>
+                      </button>
+                  <% end %>
+                </div>
+              </div>
+
+              <!-- VERIFICATION RESULTS -->
+              <%= if @current_batch.status in ["verifying", "verified", "translating", "translated"] do %>
+                <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <h3 class="text-sm font-semibold text-blue-900 mb-2">Verification Results:</h3>
+                  <div class="grid grid-cols-3 gap-4 text-sm">
+                    <div class="bg-white p-3 rounded border border-blue-200">
+                      <div class="text-blue-600 font-medium">✓ Verified</div>
+                      <div class="text-2xl font-bold text-green-600"><%= @current_batch.verified_files %></div>
+                    </div>
+                    <div class="bg-white p-3 rounded border border-blue-200">
+                      <div class="text-blue-600 font-medium">✗ Failed</div>
+                      <div class="text-2xl font-bold text-red-600"><%= @current_batch.failed_verification_files %></div>
+                    </div>
+                    <div class="bg-white p-3 rounded border border-blue-200">
+                      <div class="text-blue-600 font-medium">Total Claims</div>
+                      <div class="text-2xl font-bold text-blue-900"><%= @current_batch.total_claims %></div>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+
+              <!-- TRANSLATION RESULTS -->
+              <%= if @current_batch.status in ["translating", "translated"] do %>
+                <div class="p-4 bg-green-50 rounded-lg border border-green-200">
+                  <h3 class="text-sm font-semibold text-green-900 mb-2">Translation Results:</h3>
+                  <div class="grid grid-cols-3 gap-4 text-sm">
+                    <div class="bg-white p-3 rounded border border-green-200">
+                      <div class="text-green-600 font-medium">✓ Translated</div>
+                      <div class="text-2xl font-bold text-green-600"><%= @current_batch.translated_files %></div>
+                    </div>
+                    <div class="bg-white p-3 rounded border border-green-200">
+                      <div class="text-green-600 font-medium">✗ Failed</div>
+                      <div class="text-2xl font-bold text-red-600"><%= @current_batch.failed_translation_files %></div>
+                    </div>
+                    <div class="bg-white p-3 rounded border border-green-200">
+                      <div class="text-green-600 font-medium">Claims Charged</div>
+                      <div class="text-xl font-bold text-green-900">
+                        <%= @current_batch.total_claims_charged %>
+                        <span class="text-sm font-normal text-green-700">($<%= :erlang.float_to_binary(@current_batch.total_claims_charged * 0.10, decimals: 2) %>)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+
+              <!-- ACTION BUTTONS -->
+              <div class="mt-4 flex gap-2">
+                <button
+                  phx-click="view_batch"
+                  phx-value-id={@current_batch.id}
+                  class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+                >
+                  View Details
+                </button>
+                <%= if @current_batch.status == "translated" && @current_batch.translated_files > 0 do %>
+                  <button
+                    phx-click="download_batch_zip"
+                    phx-value-id={@current_batch.id}
+                    class="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                  >
+                    Download All JSON Files (ZIP)
+                  </button>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
 
           <!-- Batches List -->
           <div class="bg-white shadow rounded-lg p-6">
@@ -824,6 +1107,92 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 </button>
               </div>
 
+              <!-- TWO-STAGE BUTTONS IN MODAL -->
+              <%= if @current_batch.status in ["uploaded", "verifying", "verified", "translating", "translated"] do %>
+                <div class="p-6 border-b bg-gray-50">
+                  <div class="flex gap-4 mb-4">
+                    <!-- STAGE 1: VERIFY BUTTON -->
+                    <div class="flex-1">
+                      <%= if @current_batch.status == "uploaded" do %>
+                        <button
+                          phx-click="verify_batch"
+                          class="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold shadow-lg transition-all"
+                        >
+                          <div class="text-lg">🔍 Stage 1: Verify Files</div>
+                          <div class="text-xs mt-1 opacity-90">FREE - Structure Check</div>
+                        </button>
+                      <% else %>
+                        <button
+                          disabled
+                          class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
+                        >
+                          <div class="text-lg">✓ Stage 1: Verified</div>
+                          <div class="text-xs mt-1"><%= @current_batch.verified_files %> files, <%= @current_batch.total_claims %> claims</div>
+                        </button>
+                      <% end %>
+                    </div>
+
+                    <!-- STAGE 2: TRANSLATE BUTTON -->
+                    <div class="flex-1">
+                      <%= cond do %>
+                        <% @current_batch.status == "verified" -> %>
+                          <button
+                            phx-click="translate_batch"
+                            class="w-full px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-lg transition-all animate-pulse"
+                          >
+                            <div class="text-lg">🚀 Stage 2: Translate Files</div>
+                            <div class="text-xs mt-1">Cost: $<%= :erlang.float_to_binary(@current_batch.total_claims * 0.10, decimals: 2) %> (<%= @current_batch.total_claims %> claims)</div>
+                          </button>
+
+                        <% @current_batch.status == "translated" -> %>
+                          <button
+                            disabled
+                            class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
+                          >
+                            <div class="text-lg">✓ Stage 2: Translated</div>
+                            <div class="text-xs mt-1"><%= @current_batch.translated_files %> files, <%= @current_batch.total_claims_charged %> claims charged</div>
+                          </button>
+
+                        <% true -> %>
+                          <button
+                            disabled
+                            class="w-full px-6 py-4 bg-gray-300 text-gray-500 rounded-lg font-semibold shadow cursor-not-allowed opacity-50"
+                          >
+                            <div class="text-lg">🔒 Stage 2: Translate Files</div>
+                            <div class="text-xs mt-1">
+                              <%= if @current_batch.status == "uploaded" do %>
+                                Complete Stage 1 first
+                              <% else %>
+                                <%= if @current_batch.status == "verifying", do: "Verifying...", else: "Translating..." %>
+                              <% end %>
+                            </div>
+                          </button>
+                      <% end %>
+                    </div>
+                  </div>
+
+                  <!-- VERIFICATION SUMMARY -->
+                  <%= if @current_batch.status in ["verified", "translating", "translated"] do %>
+                    <div class="flex gap-3 text-sm">
+                      <div class="flex-1 bg-white p-3 rounded border border-green-200">
+                        <div class="text-green-600 font-medium text-xs">✓ Verified</div>
+                        <div class="text-xl font-bold text-green-700"><%= @current_batch.verified_files %></div>
+                      </div>
+                      <div class="flex-1 bg-white p-3 rounded border border-gray-200">
+                        <div class="text-gray-600 font-medium text-xs">Total Claims</div>
+                        <div class="text-xl font-bold text-blue-600"><%= @current_batch.total_claims %></div>
+                      </div>
+                      <%= if @current_batch.status in ["translating", "translated"] do %>
+                        <div class="flex-1 bg-white p-3 rounded border border-blue-200">
+                          <div class="text-blue-600 font-medium text-xs">🚀 Translated</div>
+                          <div class="text-xl font-bold text-blue-700"><%= @current_batch.translated_files %></div>
+                        </div>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+
               <div class="flex-1 overflow-y-auto p-6">
                 <div class="space-y-3">
                   <%= for job <- @current_batch.jobs do %>
@@ -837,7 +1206,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                           <span class={"px-3 py-1 rounded-full text-sm " <> status_class(job.status)}>
                             <%= String.upcase(job.status) %>
                           </span>
-                          <%= if job.status == "completed" do %>
+                          <%= if job.status == "verified" do %>
+                            <span class="text-xs text-green-700">
+                              <%= job.claim_count %> claim(s) found
+                            </span>
+                          <% end %>
+                          <%= if job.status in ["translated", "completed"] do %>
                             <button
                               phx-click={if @viewing_job_id == to_string(job.id), do: "hide_job_json", else: "view_job_json"}
                               phx-value-id={job.id}
@@ -855,8 +1229,15 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                           <% end %>
                         </div>
                       </div>
+                      <%= if job.verification_error do %>
+                        <div class="mt-2 p-2 bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm rounded">
+                          <div class="font-semibold">Verification Errors:</div>
+                          <%= job.verification_error %>
+                        </div>
+                      <% end %>
                       <%= if job.error_message do %>
                         <div class="mt-2 p-2 bg-red-50 text-red-700 text-sm rounded">
+                          <div class="font-semibold">Translation Error:</div>
                           <%= job.error_message %>
                         </div>
                       <% end %>
@@ -964,6 +1345,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     |> String.slice(0..50)  # Limit length
   end
 
+  defp status_class("uploaded"), do: "bg-gray-100 text-gray-800"
+  defp status_class("verifying"), do: "bg-blue-100 text-blue-800"
+  defp status_class("verified"), do: "bg-green-100 text-green-800"
+  defp status_class("failed_verification"), do: "bg-red-100 text-red-800"
+  defp status_class("translating"), do: "bg-purple-100 text-purple-800"
+  defp status_class("translated"), do: "bg-green-100 text-green-800"
+  defp status_class("failed_translation"), do: "bg-red-100 text-red-800"
   defp status_class("completed"), do: "bg-green-100 text-green-800"
   defp status_class("failed"), do: "bg-red-100 text-red-800"
   defp status_class("processing"), do: "bg-blue-100 text-blue-800"

@@ -10,19 +10,36 @@ defmodule X12Bridge.Conversions.Batch do
     field :total_files, :integer
     field :completed_files, :integer, default: 0
     field :failed_files, :integer, default: 0
-    field :status, :string, default: "pending"
+    field :status, :string, default: "uploaded"
+
+    # Verification tracking
+    field :verified_files, :integer, default: 0
+    field :failed_verification_files, :integer, default: 0
+    field :translated_files, :integer, default: 0
+    field :failed_translation_files, :integer, default: 0
+
+    # Claim tracking for billing
+    field :total_claims, :integer, default: 0
+    field :total_claims_charged, :integer, default: 0
 
     has_many :jobs, X12Bridge.Conversions.Job, foreign_key: :batch_id
 
     timestamps()
   end
 
+  # Valid batch statuses for the multi-stage pipeline
+  @valid_statuses ~w(uploaded verifying verified translating translated completed failed pending processing)
+
   @doc false
   def changeset(batch, attrs) do
     batch
-    |> cast(attrs, [:name, :total_files, :completed_files, :failed_files, :status])
+    |> cast(attrs, [
+      :name, :total_files, :completed_files, :failed_files, :status,
+      :verified_files, :failed_verification_files, :translated_files, :failed_translation_files,
+      :total_claims, :total_claims_charged
+    ])
     |> validate_required([:name, :total_files])
-    |> validate_inclusion(:status, ["pending", "processing", "completed", "failed"])
+    |> validate_inclusion(:status, @valid_statuses)
   end
 
   def progress_percentage(%__MODULE__{} = batch) do

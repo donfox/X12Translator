@@ -8,12 +8,20 @@ defmodule X12Bridge.Conversions.Job do
   schema "conversion_jobs" do
     field :original_filename, :string
     field :file_size, :integer
-    field :status, :string, default: "pending"
+    field :status, :string, default: "uploaded"
     field :json_result, :string
     field :x12_content, :string
     field :error_message, :string
     field :processing_time_ms, :integer
     field :progress, :integer, default: 0
+
+    # Verification fields
+    field :verification_result, :map
+    field :verification_error, :string
+    field :verified_at, :utc_datetime
+    field :claim_count, :integer, default: 0
+    field :claims_charged, :integer, default: 0
+    field :translated_at, :utc_datetime
 
     # Round-trip validation fields
     field :roundtrip_valid, :boolean
@@ -25,11 +33,19 @@ defmodule X12Bridge.Conversions.Job do
     timestamps()
   end
 
+  # Valid job statuses for the multi-stage pipeline
+  @valid_statuses ~w(uploaded verifying verified failed_verification translating translated failed_translation pending processing completed failed)
+
   @doc false
   def changeset(job, attrs) do
     job
-    |> cast(attrs, [:batch_id, :original_filename, :file_size, :status, :json_result, :x12_content, :error_message, :processing_time_ms, :progress, :roundtrip_valid, :roundtrip_diff, :roundtrip_error])
+    |> cast(attrs, [
+      :batch_id, :original_filename, :file_size, :status, :json_result, :x12_content,
+      :error_message, :processing_time_ms, :progress,
+      :verification_result, :verification_error, :verified_at, :claim_count, :claims_charged, :translated_at,
+      :roundtrip_valid, :roundtrip_diff, :roundtrip_error
+    ])
     |> validate_required([:original_filename])
-    |> validate_inclusion(:status, ["pending", "processing", "completed", "failed"])
+    |> validate_inclusion(:status, @valid_statuses)
   end
 end

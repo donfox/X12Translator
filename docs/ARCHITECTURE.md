@@ -2,6 +2,15 @@
 
 A focused, single-purpose Elixir application for converting X12 EDI healthcare claims to semantic JSON.
 
+## Summary
+
+**Core Module Count:** 28 modules (reduced from 30)
+
+**Recent Consolidations (Phase 2 Simplification):**
+- **JobStatus** - Centralized all job status definitions (atoms, validation, helpers)
+- **Builder** - Merged into Converter as private reconstruction functions
+- **Qualifiers** - Merged into Converter as private code lookup helpers
+
 ---
 
 ## System Overview
@@ -67,13 +76,15 @@ Stage 1: Verify (FREE)     Stage 2: Translate (BILLED)
 ┌────────────┴────────────────────────────────────────┐
 │               X12 Pipeline Modules                   │
 │                                                      │
-│  Parser (370 lines)      ← Parse X12 segments      │
+│  Parser (370 lines)           ← Parse X12 segments │
 │    ↓                                                 │
-│  Converter (774 lines)   ← X12→JSON + Builder      │
+│  Converter (~1,450 lines)     ← X12→JSON, Builder, │
+│                                  Qualifiers         │
 │    ↓                                                 │
-│  Verifier (365 lines)    ← Fast lightweight check   │
+│  Verifier (365 lines)         ← Fast lightweight    │
+│                                  check              │
 │                                                      │
-│  Supporting: Qualifiers, RoundtripValidator         │
+│  Supporting: RoundtripValidator, JobStatus          │
 └────────────┬────────────────────────────────────────┘
              │
 ┌────────────┴────────────────────────────────────────┐
@@ -192,15 +203,20 @@ Legend:
 
 ---
 
-### X12.Converter (774 lines)
-**Responsibility:** X12→JSON conversion + structure building
+### X12.Converter (~1,450 lines)
+**Responsibility:** X12→JSON conversion, reconstruction, and code lookups
 
-- Build hierarchical JSON structure
-- Extract transaction metadata
-- Map claims with service lines
-- Handle 837P (Professional), 837I (Institutional), 837D (Dental)
-- Format dates, amounts, codes
+**Integrated Functionality (Previously Separate Modules):**
+- **Builder (merged)** - Reconstructs X12 from JSON for round-trip validation
+- **Qualifiers (merged)** - Provides human-readable code descriptions (entity codes, date qualifiers, place of service, etc.)
+
+**Core Functions:**
+- Build hierarchical JSON structure from X12 segments
+- Extract transaction metadata, claims, and service lines
+- Handle 837P (Professional), 837I (Institutional), 837D (Dental) variants
+- Format dates, amounts, codes with descriptive text
 - Extract entities (providers, subscribers, patients)
+- Rebuild X12 from JSON structure for round-trip validation
 
 ---
 
@@ -212,6 +228,16 @@ Legend:
 - Validate required segments (BHT, NM1, CLM)
 - Validate segment syntax
 - Count CLM segments for billing
+
+---
+
+### JobStatus (Centralized Module)
+**Responsibility:** Single source of truth for job status definitions
+
+- Defines all valid job statuses as atoms (`:uploaded`, `:verifying`, `:verified`, `:translating`, `:translated`, `:failed_verification`, `:failed_translation`)
+- Provides validation functions for type safety
+- Helper predicates: `success?/1`, `failed?/1`, `complete?/1`
+- Replaces hardcoded status strings scattered throughout codebase
 
 ---
 

@@ -18,7 +18,6 @@ defmodule X12Bridge.X12.Converter do
   """
 
   alias X12Bridge.X12.Parser
-  alias X12Bridge.X12.Qualifiers
 
   # Maximum file size: 50MB (configurable)
   @max_file_size_bytes 50 * 1024 * 1024
@@ -222,7 +221,7 @@ defmodule X12Bridge.X12.Converter do
       %{
         segment_id: "DTP",
         date_qualifier: qualifier,
-        date_qualifier_desc: Qualifiers.date_qualifier(qualifier),
+        date_qualifier_desc: date_qualifier(qualifier),
         date_format: Parser.get_element(dtp, 2),
         date_value: Parser.get_element(dtp, 3),
         all_elements: dtp.elements
@@ -237,7 +236,7 @@ defmodule X12Bridge.X12.Converter do
       %{
         segment_id: "REF",
         reference_id_qualifier: qualifier,
-        reference_id_qualifier_desc: Qualifiers.reference_qualifier(qualifier),
+        reference_id_qualifier_desc: reference_qualifier(qualifier),
         reference_id: Parser.get_element(ref, 2),
         description: Parser.get_element(ref, 3),
         all_elements: ref.elements
@@ -268,7 +267,7 @@ defmodule X12Bridge.X12.Converter do
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
-        entity_id_code_desc: Qualifiers.entity_code(entity_code),
+        entity_id_code_desc: entity_code(entity_code),
         entity_type_qualifier: Parser.get_element(patient_nm1_segment, 2),
         name_last_or_organization: Parser.get_element(patient_nm1_segment, 3),
         name_first: Parser.get_element(patient_nm1_segment, 4),
@@ -291,7 +290,7 @@ defmodule X12Bridge.X12.Converter do
       claim_id: claim_id,
       total_charge: total_charge,
       claim_filing_indicator: claim_filing_code,
-      claim_filing_indicator_desc: Qualifiers.claim_filing_indicator(claim_filing_code),
+      claim_filing_indicator_desc: claim_filing_indicator(claim_filing_code),
       provider_signature_indicator: Parser.get_element(clm_segment, 6),
       assignment_plan: Parser.get_element(clm_segment, 7),
       benefits_assignment: Parser.get_element(clm_segment, 8),
@@ -363,7 +362,7 @@ defmodule X12Bridge.X12.Converter do
         unit_basis: unit_type,
         unit_count: quantity,
         place_of_service: place_of_service_code,
-        place_of_service_desc: Qualifiers.place_of_service(place_of_service_code),
+        place_of_service_desc: place_of_service(place_of_service_code),
         diagnosis_pointer: diagnosis_pointer,
         all_elements: sv1.elements
       }
@@ -639,7 +638,7 @@ defmodule X12Bridge.X12.Converter do
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
-        entity_id_code_desc: Qualifiers.entity_code(entity_code),
+        entity_id_code_desc: entity_code(entity_code),
         entity_type_qualifier: Parser.get_element(nm1_85, 2),
         name_last_or_organization: Parser.get_element(nm1_85, 3),
         name_first: Parser.get_element(nm1_85, 4),
@@ -668,7 +667,7 @@ defmodule X12Bridge.X12.Converter do
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
-        entity_id_code_desc: Qualifiers.entity_code(entity_code),
+        entity_id_code_desc: entity_code(entity_code),
         entity_type_qualifier: Parser.get_element(nm1_il, 2),
         name_last_or_organization: Parser.get_element(nm1_il, 3),
         name_first: Parser.get_element(nm1_il, 4),
@@ -706,7 +705,7 @@ defmodule X12Bridge.X12.Converter do
       %{
         segment_id: "NM1",
         entity_id_code: entity_code,
-        entity_id_code_desc: Qualifiers.entity_code(entity_code),
+        entity_id_code_desc: entity_code(entity_code),
         entity_type_qualifier: Parser.get_element(nm1, 2),
         name_last_or_organization: Parser.get_element(nm1, 3),
         name_first: Parser.get_element(nm1, 4),
@@ -1284,4 +1283,153 @@ defmodule X12Bridge.X12.Converter do
   end
 
   defp atomize_keys(value), do: value
+
+  # ============================================================
+  # Qualifiers: X12 Code and Qualifier Lookups (Nested Module)
+  # ============================================================
+  # Provides human-readable descriptions for X12 qualifiers and codes.
+  # Returns the code itself if no description is found (defensive approach).
+
+  defp entity_code(code) do
+    case code do
+      "40" -> "Receiver"
+      "41" -> "Submitter"
+      "71" -> "Attending Physician"
+      "72" -> "Operating Physician"
+      "77" -> "Service Location"
+      "82" -> "Rendering Provider"
+      "85" -> "Billing Provider"
+      "87" -> "Pay-to Provider"
+      "DN" -> "Referring Provider"
+      "DQ" -> "Supervising Provider"
+      "IL" -> "Insured/Subscriber"
+      "P3" -> "Primary Care Provider"
+      "PR" -> "Payer"
+      "QC" -> "Patient"
+      "X3" -> "Dependent"
+      _ -> code  # Return code if unknown
+    end
+  end
+
+  defp date_qualifier(code) do
+    case code do
+      "096" -> "Discharge Date"
+      "097" -> "Discharge Hour"
+      "098" -> "Admission Date"
+      "291" -> "Statement From Date"
+      "292" -> "Statement To Date"
+      "304" -> "Last Visit Date"
+      "318" -> "Symptom Date"
+      "319" -> "Last X-Ray Date"
+      "431" -> "Onset of Current Symptoms"
+      "435" -> "Admission Date/Hour"
+      "439" -> "Accident Date"
+      "453" -> "Acute Manifestation Date"
+      "454" -> "Initial Treatment Date"
+      "455" -> "Last Seen Date"
+      "471" -> "Prescription Date"
+      "472" -> "Service Date"
+      "573" -> "Certification Date"
+      "607" -> "Disability From Date"
+      "610" -> "Disability Through Date"
+      _ -> code
+    end
+  end
+
+  defp reference_qualifier(code) do
+    case code do
+      "0B" -> "State License Number"
+      "1A" -> "Blue Cross Provider Number"
+      "1B" -> "Blue Shield Provider Number"
+      "1C" -> "Medicare Provider Number"
+      "1D" -> "Medicaid Provider Number"
+      "1G" -> "Provider UPIN Number"
+      "1H" -> "CHAMPUS Identification Number"
+      "1J" -> "Facility ID Number"
+      "4A" -> "Investigation Number"
+      "6R" -> "Provider Control Number"
+      "9A" -> "Repriced Claim Number"
+      "9C" -> "Repriced Line Item Reference"
+      "D3" -> "Membership Number"
+      "D9" -> "Prior Authorization Number"
+      "EA" -> "Medical Record Identification Number"
+      "EI" -> "Employer ID Number"
+      "F5" -> "Medicare Version Code"
+      "F8" -> "Original Reference Number"
+      "G1" -> "Referral Number"
+      "G3" -> "Location Number"
+      "LU" -> "Location Number"
+      "SY" -> "Social Security Number"
+      "X4" -> "Clinical Laboratory Improvement Amendment Number"
+      "Y4" -> "Agency Claim Number"
+      _ -> code
+    end
+  end
+
+  defp claim_filing_indicator(code) do
+    case code do
+      "09" -> "Self Pay"
+      "11" -> "Other Non-Federal Programs"
+      "12" -> "Preferred Provider Organization (PPO)"
+      "13" -> "Point of Service (POS)"
+      "14" -> "Exclusive Provider Organization (EPO)"
+      "15" -> "Indemnity Insurance"
+      "16" -> "Health Maintenance Organization (HMO) Medicare Risk"
+      "AM" -> "Automobile Medical"
+      "BL" -> "Blue Cross/Blue Shield"
+      "CH" -> "CHAMPUS"
+      "CI" -> "Commercial Insurance Co."
+      "DS" -> "Disability"
+      "FI" -> "Federal Employees Program"
+      "HM" -> "Health Maintenance Organization"
+      "LM" -> "Liability Medical"
+      "MA" -> "Medicare Part A"
+      "MB" -> "Medicare Part B"
+      "MC" -> "Medicaid"
+      "OF" -> "Other Federal Program"
+      "TV" -> "Title V"
+      "VA" -> "Veterans Affairs Plan"
+      "WC" -> "Workers Compensation Health Claim"
+      "ZZ" -> "Mutually Defined"
+      _ -> code
+    end
+  end
+
+  defp place_of_service(code) do
+    case code do
+      "01" -> "Pharmacy"
+      "02" -> "Telehealth Provided Other than in Patient's Home"
+      "10" -> "Telehealth Provided in Patient's Home"
+      "11" -> "Office"
+      "12" -> "Home"
+      "21" -> "Inpatient Hospital"
+      "22" -> "On Campus-Outpatient Hospital"
+      "23" -> "Emergency Room - Hospital"
+      "24" -> "Ambulatory Surgical Center"
+      "31" -> "Skilled Nursing Facility"
+      "32" -> "Nursing Facility"
+      "33" -> "Custodial Care Facility"
+      "34" -> "Hospice"
+      "41" -> "Ambulance - Land"
+      "42" -> "Ambulance - Air or Water"
+      "49" -> "Independent Clinic"
+      "50" -> "Federally Qualified Health Center"
+      "51" -> "Inpatient Psychiatric Facility"
+      "52" -> "Psychiatric Facility-Partial Hospitalization"
+      "53" -> "Community Mental Health Center"
+      "54" -> "Intermediate Care Facility/Individuals with Intellectual Disabilities"
+      "55" -> "Residential Substance Abuse Treatment Facility"
+      "56" -> "Psychiatric Residential Treatment Center"
+      "57" -> "Non-residential Substance Abuse Treatment Facility"
+      "60" -> "Mass Immunization Center"
+      "61" -> "Comprehensive Inpatient Rehabilitation Facility"
+      "62" -> "Comprehensive Outpatient Rehabilitation Facility"
+      "65" -> "End-Stage Renal Disease Treatment Facility"
+      "71" -> "Public Health Clinic"
+      "72" -> "Rural Health Clinic"
+      "81" -> "Independent Laboratory"
+      "99" -> "Other Place of Service"
+      _ -> code
+    end
+  end
 end

@@ -47,7 +47,7 @@ defmodule X12Bridge.Conversions.Job do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias X12Bridge.JobStatus
+  alias X12Bridge.Conversions.Status
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -111,6 +111,6 @@ defmodule X12Bridge.Conversions.Job do
       :roundtrip_error
     ])
     |> validate_required([:original_filename])
-    |> validate_inclusion(:status, JobStatus.list_all_strings())
+    |> validate_inclusion(:status, Status.list_all_strings())
   end
 end

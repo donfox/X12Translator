@@ -38,3 +38,6 @@ npm-debug.log
 # Batch processing test artifacts
 /priv/batch_processing/
 
+# macOS system files
+.DS_Store
+

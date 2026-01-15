@@ -15,10 +15,15 @@ defmodule X12Bridge.Repo.Migrations.AddVerificationFieldsToJobs do
     # =========================================================================
     alter table(:conversion_jobs) do
       # Verification results
-      add :verification_result, :jsonb, comment: "Verification metadata (transaction_type, claim_count, etc.)"
+      add :verification_result, :jsonb,
+        comment: "Verification metadata (transaction_type, claim_count, etc.)"
+
       add :verification_error, :text, comment: "Error message if verification failed"
       add :verified_at, :utc_datetime, comment: "Timestamp when verification completed"
-      add :claim_count, :integer, default: 0, comment: "Number of billable claims (CLM segments) found"
+
+      add :claim_count, :integer,
+        default: 0,
+        comment: "Number of billable claims (CLM segments) found"
 
       # =========================================================================
       # Stage 2: Translation (BILLED) - Full conversion + validation
@@ -26,7 +31,10 @@ defmodule X12Bridge.Repo.Migrations.AddVerificationFieldsToJobs do
       # After verification passes, files are translated (X12→JSON with round-trip
       # validation). Billing happens ONLY for successfully translated files.
       # =========================================================================
-      add :claims_charged, :integer, default: 0, comment: "Number of claims actually billed after successful translation"
+      add :claims_charged, :integer,
+        default: 0,
+        comment: "Number of claims actually billed after successful translation"
+
       add :translated_at, :utc_datetime, comment: "Timestamp when translation completed"
     end
 

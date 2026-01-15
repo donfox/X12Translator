@@ -330,4 +330,5 @@ config :x12_bridge, :remote_fetcher,
 ## Related Documentation
 
 - **[API.md](API.md)** - Database schema, error codes, configuration, module reference
-- **[README.md](../README.md)** - Quick start, features, setup
+- **[X12BRIDGE_db.pdf](X12BRIDGE_db.pdf)** - Entity Relationship Diagram (ERD) showing all database tables and relationships
+- **[SETUP_TROUBLESHOOTING.md](SETUP_TROUBLESHOOTING.md)** - Common setup issues and solutions for macOS and Ubuntu

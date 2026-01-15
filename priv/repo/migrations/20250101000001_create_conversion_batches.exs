@@ -21,9 +21,15 @@ defmodule X12Bridge.Repo.Migrations.CreateConversionBatches do
       add :total_files, :integer, comment: "Total files in this batch"
 
       # Processing progress tracking
-      add :completed_files, :integer, default: 0, comment: "Files that finished (success or failure)"
+      add :completed_files, :integer,
+        default: 0,
+        comment: "Files that finished (success or failure)"
+
       add :failed_files, :integer, default: 0, comment: "Files that encountered errors"
-      add :status, :string, default: "pending", comment: "Current batch status (pending/processing/completed/failed)"
+
+      add :status, :string,
+        default: "pending",
+        comment: "Current batch status (pending/processing/completed/failed)"
 
       timestamps()
     end
@@ -37,15 +43,22 @@ defmodule X12Bridge.Repo.Migrations.CreateConversionBatches do
     create table(:conversion_jobs, primary_key: false) do
       # Identification & relationships
       add :id, :uuid, primary_key: true
-      add :batch_id, references(:conversion_batches, type: :uuid, on_delete: :delete_all), comment: "Parent batch"
+
+      add :batch_id, references(:conversion_batches, type: :uuid, on_delete: :delete_all),
+        comment: "Parent batch"
 
       # File metadata
       add :original_filename, :string, comment: "Original filename of uploaded file"
       add :file_size, :integer, comment: "File size in bytes"
 
       # Processing status & progress
-      add :status, :string, default: "pending", comment: "Current job status (pending/processing/completed/failed)"
-      add :json_result, :text, comment: "Converted JSON output (stored after successful translation)"
+      add :status, :string,
+        default: "pending",
+        comment: "Current job status (pending/processing/completed/failed)"
+
+      add :json_result, :text,
+        comment: "Converted JSON output (stored after successful translation)"
+
       add :error_message, :text, comment: "Error details if processing failed"
       add :processing_time_ms, :integer, comment: "Total milliseconds spent processing this file"
       add :progress, :integer, default: 0, comment: "Processing progress percentage (0-100)"

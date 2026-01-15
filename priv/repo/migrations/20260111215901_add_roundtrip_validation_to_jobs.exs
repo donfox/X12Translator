@@ -18,7 +18,9 @@ defmodule X12Bridge.Repo.Migrations.AddRoundtripValidationToJobs do
     # =========================================================================
     alter table(:conversion_jobs) do
       # Validation result & details
-      add :roundtrip_valid, :boolean, comment: "Whether X12→JSON→X12 reconstruction matches original"
+      add :roundtrip_valid, :boolean,
+        comment: "Whether X12→JSON→X12 reconstruction matches original"
+
       add :roundtrip_diff, :text, comment: "Segment-by-segment diff if reconstruction failed"
       add :roundtrip_error, :text, comment: "Error message if round-trip validation failed"
     end

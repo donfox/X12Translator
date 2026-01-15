@@ -39,7 +39,7 @@ defmodule X12Bridge.Conversions.Batch do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias X12Bridge.JobStatus
+  alias X12Bridge.Conversions.Status
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -75,12 +75,20 @@ defmodule X12Bridge.Conversions.Batch do
   def changeset(batch, attrs) do
     batch
     |> cast(attrs, [
-      :name, :total_files, :completed_files, :failed_files, :status,
-      :verified_files, :failed_verification_files, :translated_files, :failed_translation_files,
-      :total_claims, :total_claims_charged
+      :name,
+      :total_files,
+      :completed_files,
+      :failed_files,
+      :status,
+      :verified_files,
+      :failed_verification_files,
+      :translated_files,
+      :failed_translation_files,
+      :total_claims,
+      :total_claims_charged
     ])
     |> validate_required([:name, :total_files])
-    |> validate_inclusion(:status, JobStatus.list_batch_status_strings())
+    |> validate_inclusion(:status, Status.list_batch_status_strings())
   end
 
   def progress_percentage(%__MODULE__{} = batch) do

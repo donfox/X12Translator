@@ -1,4 +1,4 @@
-defmodule X12Bridge.JobStatus do
+defmodule X12Bridge.Conversions.Status do
   @moduledoc """
   Centralized status definitions for jobs and batches.
 
@@ -73,7 +73,7 @@ defmodule X12Bridge.JobStatus do
 
   ## Examples
 
-      iex> JobStatus.list_all()
+      iex> Status.list_all()
       [:uploaded, :verifying, :verified, :failed_verification, :translating, :translated, :failed_translation, :pending, :processing, :completed, :failed]
   """
   def list_all, do: @job_statuses
@@ -92,7 +92,7 @@ defmodule X12Bridge.JobStatus do
 
   ## Examples
 
-      iex> JobStatus.list_all_strings()
+      iex> Status.list_all_strings()
       ["uploaded", "verifying", "verified", "failed_verification", "translating", "translated", "failed_translation", "pending", "processing", "completed", "failed"]
   """
   def list_all_strings, do: Enum.map(@job_statuses, &to_string/1)
@@ -111,17 +111,17 @@ defmodule X12Bridge.JobStatus do
 
   ## Examples
 
-      iex> JobStatus.valid?(:uploaded)
+      iex> Status.valid?(:uploaded)
       true
 
-      iex> JobStatus.valid?("uploaded")
+      iex> Status.valid?("uploaded")
       true
 
-      iex> JobStatus.valid?(:invalid)
+      iex> Status.valid?(:invalid)
       false
   """
-  def valid?(status) when is_atom(status), do: status in @statuses
-  def valid?(status) when is_binary(status), do: status in @statuses_strings
+  def valid?(status) when is_atom(status), do: status in @job_statuses
+  def valid?(status) when is_binary(status), do: status in list_all_strings()
   def valid?(_), do: false
 
   @doc """
@@ -129,13 +129,13 @@ defmodule X12Bridge.JobStatus do
 
   ## Examples
 
-      iex> JobStatus.complete?(:translated)
+      iex> Status.complete?(:translated)
       true
 
-      iex> JobStatus.complete?(:failed_translation)
+      iex> Status.complete?(:failed_translation)
       true
 
-      iex> JobStatus.complete?(:verifying)
+      iex> Status.complete?(:verifying)
       false
   """
   def complete?(:translated), do: true
@@ -150,10 +150,10 @@ defmodule X12Bridge.JobStatus do
 
   ## Examples
 
-      iex> JobStatus.success?(:translated)
+      iex> Status.success?(:translated)
       true
 
-      iex> JobStatus.success?(:failed_translation)
+      iex> Status.success?(:failed_translation)
       false
   """
   def success?(:translated), do: true
@@ -165,10 +165,10 @@ defmodule X12Bridge.JobStatus do
 
   ## Examples
 
-      iex> JobStatus.failed?(:failed_translation)
+      iex> Status.failed?(:failed_translation)
       true
 
-      iex> JobStatus.failed?(:translated)
+      iex> Status.failed?(:translated)
       false
   """
   def failed?(:failed_translation), do: true
@@ -177,40 +177,14 @@ defmodule X12Bridge.JobStatus do
   def failed?(_), do: false
 
   @doc """
-  Check if a status is part of the verification stage.
-
-  ## Examples
-
-      iex> JobStatus.verifying?(:verifying)
-      true
-
-      iex> JobStatus.verifying?(:verified)
-      true
-
-      iex> JobStatus.verifying?(:translating)
-      false
+  Check if status is in verifying stage.
   """
   def verifying?(:verifying), do: true
-  def verifying?(:verified), do: true
-  def verifying?(:failed_verification), do: true
   def verifying?(_), do: false
 
   @doc """
-  Check if a status is part of the translation stage.
-
-  ## Examples
-
-      iex> JobStatus.translating?(:translating)
-      true
-
-      iex> JobStatus.translating?(:translated)
-      true
-
-      iex> JobStatus.translating?(:verifying)
-      false
+  Check if status is in translating stage.
   """
   def translating?(:translating), do: true
-  def translating?(:translated), do: true
-  def translating?(:failed_translation), do: true
   def translating?(_), do: false
 end

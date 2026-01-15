@@ -115,8 +115,8 @@ x12_bridge/
 ### Web Interface
 
 1. Visit [http://localhost:4000/converter](http://localhost:4000/converter)
-2. Click "Load 837P Sample"
-3. Click "Validate & Convert to JSON"
+2. Upload or drag-and-drop an X12 file (837P, 837I, or 837D)
+3. JSON output displays automatically with validation results
 4. Download or copy the JSON output
 
 ### Programmatic

@@ -59,8 +59,11 @@ config :mime, :types, %{
 }
 
 # Configure batch retention policy
+config :x12_bridge, :batch_max_concurrency, System.schedulers_online()
+
 config :x12_bridge, :batch_retention,
-  max_batches: 50  # Keep only the 50 most recent batches in development
+  # Keep only the 50 most recent batches in development
+  max_batches: 50
 
 # Configure remote batch fetcher
 config :x12_bridge, :remote_fetcher,

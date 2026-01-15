@@ -27,16 +27,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:current_path, "/converter")
      |> assign(:batches, batches)
      |> assign(:current_batch, nil)
-     |> assign(:viewing_job_id, nil)  # Track which job's JSON is being viewed
-     |> assign(:processing_mode, :upload)  # :upload or :remote_import
-     |> assign(:remote_status, nil)  # nil, :processing, :completed, :error
+     # Track which job's JSON is being viewed
+     |> assign(:viewing_job_id, nil)
+     # :upload or :remote_import
+     |> assign(:processing_mode, :upload)
+     # nil, :processing, :completed, :error
+     |> assign(:remote_status, nil)
      |> assign(:remote_result, nil)
-     |> assign(:processing_status, nil)  # Track active processing
-     |> assign(:uploaded_files, %{})  # Store uploaded file contents for verification/translation
+     # Track active processing
+     |> assign(:processing_status, nil)
+     # Store uploaded file contents for verification/translation
+     |> assign(:uploaded_files, %{})
      |> allow_upload(:batch_files,
-         accept: [".x12", ".edi", ".txt", ".zip"],
-         max_entries: 50,
-         max_file_size: 10_000_000)}
+       accept: [".x12", ".edi", ".txt", ".zip"],
+       max_entries: 50,
+       max_file_size: 10_000_000
+     )}
   end
 
   # === MODE SWITCHING ===
@@ -145,24 +151,26 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
       # Extract all files (including from ZIP files)
       all_files = extract_uploaded_files(socket)
 
-      {:ok, batch} = Conversions.create_batch(%{
-        name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
-        total_files: length(all_files),
-        status: "uploaded"
-      })
+      {:ok, batch} =
+        Conversions.create_batch(%{
+          name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
+          total_files: length(all_files),
+          status: "uploaded"
+        })
 
       Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
 
       # Create jobs and store file contents
       files_to_process =
         Enum.map(all_files, fn {filename, content, file_size} ->
-          {:ok, job} = Conversions.create_job(%{
-            batch_id: batch.id,
-            original_filename: filename,
-            file_size: file_size,
-            status: "uploaded",
-            x12_content: content
-          })
+          {:ok, job} =
+            Conversions.create_job(%{
+              batch_id: batch.id,
+              original_filename: filename,
+              file_size: file_size,
+              status: "uploaded",
+              x12_content: content
+            })
 
           {job.id, content}
         end)
@@ -175,7 +183,10 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
        |> assign(:batches, batches)
        |> assign(:current_batch, Conversions.get_batch!(batch.id))
        |> assign(:uploaded_files, files_to_process)
-       |> put_flash(:info, "Staged #{batch.total_files} files. Click 'Verify' to check X12 structure.")}
+       |> put_flash(
+         :info,
+         "Staged #{batch.total_files} files. Click 'Verify' to check X12 structure."
+       )}
     end
   end
 
@@ -228,7 +239,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     {:noreply,
      socket
      |> assign(:current_batch, nil)
-     |> assign(:processing_status, nil)}  # Clear processing status when closing batch
+     # Clear processing status when closing batch
+     |> assign(:processing_status, nil)}
   end
 
   @impl true
@@ -267,7 +279,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   def handle_event("download_job", %{"id" => job_id}, socket) do
     job = Conversions.get_job!(job_id)
 
-    if job.status == "completed" && job.json_result do
+    if job.status in ["completed", "translated"] && job.json_result do
       {:noreply,
        socket
        |> push_event("download", %{
@@ -286,7 +298,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     # Get all completed jobs with JSON results
     completed_jobs =
       batch.jobs
-      |> Enum.filter(fn job -> job.status == "completed" && job.json_result end)
+      |> Enum.filter(fn job -> job.status in ["completed", "translated"] && job.json_result end)
 
     if length(completed_jobs) == 0 do
       {:noreply, put_flash(socket, :error, "No completed conversions to download")}
@@ -322,11 +334,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_info({:job_completed, _job_id, _status}, socket) do
-    batch = if socket.assigns.current_batch do
-      Conversions.get_batch!(socket.assigns.current_batch.id)
-    else
-      nil
-    end
+    batch =
+      if socket.assigns.current_batch do
+        Conversions.get_batch!(socket.assigns.current_batch.id)
+      else
+        nil
+      end
 
     batches = Conversions.list_batches(limit: 10)
 
@@ -345,8 +358,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      socket
      |> assign(:batches, batches)
      |> assign(:current_batch, batch)
-     |> assign(:processing_status, :completed)  # Mark as completed
-     |> put_flash(:info, "Batch completed! #{batch.completed_files} successful, #{batch.failed_files} failed")}
+     # Mark as completed
+     |> assign(:processing_status, :completed)
+     |> put_flash(
+       :info,
+       "Batch completed! #{batch.completed_files} successful, #{batch.failed_files} failed"
+     )}
   end
 
   @impl true
@@ -359,7 +376,10 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:remote_status, :completed)
      |> assign(:remote_result, batch)
      |> assign(:current_batch, batch)
-     |> put_flash(:info, "Remote import complete! #{batch.completed_files} successful, #{batch.failed_files} failed")}
+     |> put_flash(
+       :info,
+       "Remote import complete! #{batch.completed_files} successful, #{batch.failed_files} failed"
+     )}
   end
 
   @impl true
@@ -376,11 +396,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_info({:job_verified, _job_id}, socket) do
-    batch = if socket.assigns.current_batch do
-      Conversions.get_batch!(socket.assigns.current_batch.id)
-    else
-      nil
-    end
+    batch =
+      if socket.assigns.current_batch do
+        Conversions.get_batch!(socket.assigns.current_batch.id)
+      else
+        nil
+      end
 
     batches = Conversions.list_batches(limit: 10)
 
@@ -392,11 +413,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_info({:job_verification_failed, _job_id, _error_message}, socket) do
-    batch = if socket.assigns.current_batch do
-      Conversions.get_batch!(socket.assigns.current_batch.id)
-    else
-      nil
-    end
+    batch =
+      if socket.assigns.current_batch do
+        Conversions.get_batch!(socket.assigns.current_batch.id)
+      else
+        nil
+      end
 
     batches = Conversions.list_batches(limit: 10)
 
@@ -411,11 +433,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     batch = Conversions.get_batch!(batch_id)
     batches = Conversions.list_batches(limit: 10)
 
-    message = if failed_count > 0 do
-      "Verification complete! #{verified_count} passed (#{total_claims} claims), #{failed_count} failed"
-    else
-      "Verification complete! All #{verified_count} files passed (#{total_claims} claims total)"
-    end
+    message =
+      if failed_count > 0 do
+        "Verification complete! #{verified_count} passed (#{total_claims} claims), #{failed_count} failed"
+      else
+        "Verification complete! All #{verified_count} files passed (#{total_claims} claims total)"
+      end
 
     {:noreply,
      socket
@@ -429,11 +452,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_info({:job_translated, _job_id}, socket) do
-    batch = if socket.assigns.current_batch do
-      Conversions.get_batch!(socket.assigns.current_batch.id)
-    else
-      nil
-    end
+    batch =
+      if socket.assigns.current_batch do
+        Conversions.get_batch!(socket.assigns.current_batch.id)
+      else
+        nil
+      end
 
     batches = Conversions.list_batches(limit: 10)
 
@@ -445,11 +469,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_info({:job_translation_failed, _job_id, _error_message}, socket) do
-    batch = if socket.assigns.current_batch do
-      Conversions.get_batch!(socket.assigns.current_batch.id)
-    else
-      nil
-    end
+    batch =
+      if socket.assigns.current_batch do
+        Conversions.get_batch!(socket.assigns.current_batch.id)
+      else
+        nil
+      end
 
     batches = Conversions.list_batches(limit: 10)
 
@@ -460,17 +485,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   end
 
   @impl true
-  def handle_info({:batch_translated, batch_id, translated_count, failed_count, claims_charged}, socket) do
+  def handle_info(
+        {:batch_translated, batch_id, translated_count, failed_count, claims_charged},
+        socket
+      ) do
     batch = Conversions.get_batch!(batch_id)
     batches = Conversions.list_batches(limit: 10)
 
-    cost = claims_charged * 0.10  # $0.10 per claim
+    # $0.10 per claim
+    cost = claims_charged * 0.10
 
-    message = if failed_count > 0 do
-      "Translation complete! #{translated_count} succeeded, #{failed_count} failed. Cost: $#{:erlang.float_to_binary(cost, decimals: 2)}"
-    else
-      "Translation complete! All #{translated_count} files succeeded. Cost: $#{:erlang.float_to_binary(cost, decimals: 2)}"
-    end
+    message =
+      if failed_count > 0 do
+        "Translation complete! #{translated_count} succeeded, #{failed_count} failed. Cost: $#{:erlang.float_to_binary(cost, decimals: 2)}"
+      else
+        "Translation complete! All #{translated_count} files succeeded. Cost: $#{:erlang.float_to_binary(cost, decimals: 2)}"
+      end
 
     {:noreply,
      socket
@@ -494,8 +524,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             Convert 1-50 X12 files using web upload or remote URL
           </p>
         </div>
-
-        <!-- Mode Switcher -->
+        
+    <!-- Mode Switcher -->
         <div class="mb-6 bg-gray-800 rounded-lg p-4">
           <div class="flex items-center gap-4">
             <span class="text-white font-medium">Processing Mode:</span>
@@ -517,8 +547,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </div>
           </div>
         </div>
-
-        <!-- PROCESSING STATUS INDICATOR -->
+        
+    <!-- PROCESSING STATUS INDICATOR -->
         <%= if @processing_status == :active && @current_batch do %>
           <div class="mb-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
             <div class="flex items-center justify-between mb-2">
@@ -532,21 +562,39 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
               </button>
             </div>
             <div class="flex items-center gap-4">
-              <svg class="animate-spin h-8 w-8 text-blue-600 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <svg
+                class="animate-spin h-8 w-8 text-blue-600 flex-shrink-0"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                >
+                </circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                >
+                </path>
               </svg>
               <div class="flex-1">
                 <p class="text-sm text-blue-700 font-medium">
-                  <%= @current_batch.completed_files + @current_batch.failed_files %> of <%= @current_batch.total_files %> files processed
+                  {@current_batch.completed_files + @current_batch.failed_files} of {@current_batch.total_files} files processed
                 </p>
                 <% completed = @current_batch.completed_files %>
                 <% failed = @current_batch.failed_files %>
                 <%= if completed > 0 || failed > 0 do %>
                   <p class="text-xs text-blue-600 mt-1">
-                    <span class="text-green-600 font-medium"><%= completed %> successful</span>
+                    <span class="text-green-600 font-medium">{completed} successful</span>
                     <%= if failed > 0 do %>
-                      · <span class="text-red-600 font-medium"><%= failed %> failed</span>
+                      · <span class="text-red-600 font-medium">{failed} failed</span>
                     <% end %>
                   </p>
                 <% end %>
@@ -560,7 +608,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
               </div>
               <div class="text-right flex-shrink-0">
                 <div class="text-3xl font-bold text-blue-900">
-                  <%= Batch.progress_percentage(@current_batch) %>%
+                  {Batch.progress_percentage(@current_batch)}%
                 </div>
                 <div class="text-xs text-blue-600">Complete</div>
               </div>
@@ -570,19 +618,29 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </div>
           </div>
         <% end %>
-
-        <!-- PROCESSING COMPLETED INDICATOR -->
+        
+    <!-- PROCESSING COMPLETED INDICATOR -->
         <%= if @processing_status == :completed && @current_batch do %>
           <div class="mb-6 bg-green-50 border-2 border-green-200 rounded-lg p-6">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-4">
-                <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg
+                  class="h-8 w-8 text-green-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
                 <div>
                   <h3 class="text-lg font-bold text-green-900">✅ Processing Complete!</h3>
                   <p class="text-sm text-green-700">
-                    <%= @current_batch.completed_files %> successful · <%= @current_batch.failed_files %> failed · <%= @current_batch.total_files %> total
+                    {@current_batch.completed_files} successful · {@current_batch.failed_files} failed · {@current_batch.total_files} total
                   </p>
                 </div>
               </div>
@@ -595,97 +653,122 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </div>
           </div>
         <% end %>
-
-        <!-- WEB UPLOAD MODE -->
+        
+    <!-- WEB UPLOAD MODE -->
         <%= if @processing_mode == :upload do %>
           <div class="mb-8 bg-white shadow rounded-lg p-6">
             <div class="mb-4">
               <h2 class="text-xl font-semibold text-gray-900">Upload Files</h2>
-              <p class="text-sm text-gray-500">Upload individual files or ZIP archives containing multiple X12 files</p>
+              <p class="text-sm text-gray-500">
+                Upload individual files or ZIP archives containing multiple X12 files
+              </p>
             </div>
 
             <form phx-submit="process_batch" phx-change="validate_upload" class="space-y-4">
-                <div class="border-2 border-dashed border-gray-300 rounded-lg p-6" phx-drop-target={@uploads.batch_files.ref}>
-                  <.live_file_input upload={@uploads.batch_files} class="hidden" />
-                  <label
-                    for={@uploads.batch_files.ref}
-                    class="cursor-pointer flex flex-col items-center"
+              <div
+                class="border-2 border-dashed border-gray-300 rounded-lg p-6"
+                phx-drop-target={@uploads.batch_files.ref}
+              >
+                <.live_file_input upload={@uploads.batch_files} class="hidden" />
+                <label
+                  for={@uploads.batch_files.ref}
+                  class="cursor-pointer flex flex-col items-center"
+                >
+                  <svg
+                    class="w-12 h-12 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <p class="mt-2 text-sm text-gray-600">
-                      Click to select or drag and drop files
-                    </p>
-                    <p class="mt-1 text-xs text-gray-500">
-                      X12, EDI, TXT, or ZIP files (up to 50 files, 10MB each)
-                    </p>
-                    <p class="mt-1 text-xs text-gray-400">
-                      ZIP files will be automatically extracted
-                    </p>
-                  </label>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                    />
+                  </svg>
+                  <p class="mt-2 text-sm text-gray-600">
+                    Click to select or drag and drop files
+                  </p>
+                  <p class="mt-1 text-xs text-gray-500">
+                    X12, EDI, TXT, or ZIP files (up to 50 files, 10MB each)
+                  </p>
+                  <p class="mt-1 text-xs text-gray-400">
+                    ZIP files will be automatically extracted
+                  </p>
+                </label>
 
-                  <div :for={entry <- @uploads.batch_files.entries} class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <div class="flex justify-between items-center">
-                      <div class="flex-1">
-                        <span class="text-base font-semibold text-gray-900"><%= entry.client_name %></span>
-                        <span class="text-sm text-gray-600 ml-3"><%= format_bytes(entry.client_size) %></span>
-                      </div>
-                      <button
-                        type="button"
-                        phx-click="cancel_upload"
-                        phx-value-ref={entry.ref}
-                        class="ml-4 px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors flex items-center gap-1"
-                        title="Remove this file"
-                      >
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        Remove
-                      </button>
+                <div
+                  :for={entry <- @uploads.batch_files.entries}
+                  class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg"
+                >
+                  <div class="flex justify-between items-center">
+                    <div class="flex-1">
+                      <span class="text-base font-semibold text-gray-900">{entry.client_name}</span>
+                      <span class="text-sm text-gray-600 ml-3">
+                        {format_bytes(entry.client_size)}
+                      </span>
                     </div>
-
-                    <!-- Upload progress bar (if uploading) -->
-                    <%= if entry.progress > 0 && entry.progress < 100 do %>
-                      <div class="mt-2 bg-green-200 rounded-full h-2">
-                        <div
-                          class="bg-green-600 h-2 rounded-full transition-all duration-300"
-                          style={"width: #{entry.progress}%"}
-                        >
-                        </div>
-                      </div>
-                      <p class="text-xs text-green-600 mt-1">Uploading... <%= entry.progress %>%</p>
-                    <% end %>
-
-                    <!-- Error display -->
-                    <%= for err <- upload_errors(@uploads.batch_files, entry) do %>
-                      <p class="mt-2 text-sm text-red-600">
-                        ⚠️ <%= error_to_string(err) %>
-                      </p>
-                    <% end %>
+                    <button
+                      type="button"
+                      phx-click="cancel_upload"
+                      phx-value-ref={entry.ref}
+                      class="ml-4 px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors flex items-center gap-1"
+                      title="Remove this file"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                      Remove
+                    </button>
                   </div>
+                  
+    <!-- Upload progress bar (if uploading) -->
+                  <%= if entry.progress > 0 && entry.progress < 100 do %>
+                    <div class="mt-2 bg-green-200 rounded-full h-2">
+                      <div
+                        class="bg-green-600 h-2 rounded-full transition-all duration-300"
+                        style={"width: #{entry.progress}%"}
+                      >
+                      </div>
+                    </div>
+                    <p class="text-xs text-green-600 mt-1">Uploading... {entry.progress}%</p>
+                  <% end %>
+                  
+    <!-- Error display -->
+                  <%= for err <- upload_errors(@uploads.batch_files, entry) do %>
+                    <p class="mt-2 text-sm text-red-600">
+                      ⚠️ {error_to_string(err)}
+                    </p>
+                  <% end %>
                 </div>
+              </div>
 
-                <%= if length(@uploads.batch_files.entries) > 0 do %>
-                  <button
-                    type="submit"
-                    class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                  >
-                    Stage <%= length(@uploads.batch_files.entries) %> Files for Verification
-                  </button>
-                <% end %>
-              </form>
+              <%= if length(@uploads.batch_files.entries) > 0 do %>
+                <button
+                  type="submit"
+                  class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Stage {length(@uploads.batch_files.entries)} Files for Verification
+                </button>
+              <% end %>
+            </form>
           </div>
-
-          <!-- TWO-STAGE PROCESSING PANEL (Verify & Translate) -->
+          
+    <!-- TWO-STAGE PROCESSING PANEL (Verify & Translate) -->
           <%= if @current_batch && @current_batch.status in ["uploaded", "verifying", "verified", "translating", "translated"] do %>
             <div class="mb-8 bg-white shadow rounded-lg p-6 border-2 border-blue-200">
               <div class="mb-4">
-                <h2 class="text-xl font-semibold text-gray-900">Processing: <%= @current_batch.name %></h2>
-                <p class="text-sm text-gray-500"><%= @current_batch.total_files %> files staged</p>
+                <h2 class="text-xl font-semibold text-gray-900">Processing: {@current_batch.name}</h2>
+                <p class="text-sm text-gray-500">{@current_batch.total_files} files staged</p>
               </div>
-
-              <!-- TWO BUTTONS SIDE-BY-SIDE -->
+              
+    <!-- TWO BUTTONS SIDE-BY-SIDE -->
               <div class="flex gap-4 mb-6">
                 <!-- STAGE 1: VERIFY BUTTON -->
                 <div class="flex-1">
@@ -703,12 +786,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                       class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
                     >
                       <div class="text-lg">✓ Stage 1: Verified</div>
-                      <div class="text-xs mt-1"><%= @current_batch.verified_files %> files, <%= @current_batch.total_claims %> claims</div>
+                      <div class="text-xs mt-1">
+                        {@current_batch.verified_files} files, {@current_batch.total_claims} claims
+                      </div>
                     </button>
                   <% end %>
                 </div>
-
-                <!-- STAGE 2: TRANSLATE BUTTON -->
+                
+    <!-- STAGE 2: TRANSLATE BUTTON -->
                 <div class="flex-1">
                   <%= cond do %>
                     <% @current_batch.status == "verified" -> %>
@@ -717,18 +802,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                         class="w-full px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-lg transition-all animate-pulse"
                       >
                         <div class="text-lg">🚀 Stage 2: Translate Files</div>
-                        <div class="text-xs mt-1">Cost: $<%= :erlang.float_to_binary(@current_batch.total_claims * 0.10, decimals: 2) %> (<%= @current_batch.total_claims %> claims)</div>
+                        <div class="text-xs mt-1">
+                          Cost: ${:erlang.float_to_binary(@current_batch.total_claims * 0.10,
+                            decimals: 2
+                          )} ({@current_batch.total_claims} claims)
+                        </div>
                       </button>
-
                     <% @current_batch.status == "translated" -> %>
                       <button
                         disabled
                         class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
                       >
                         <div class="text-lg">✓ Stage 2: Translated</div>
-                        <div class="text-xs mt-1"><%= @current_batch.translated_files %> files, <%= @current_batch.total_claims_charged %> claims charged</div>
+                        <div class="text-xs mt-1">
+                          {@current_batch.translated_files} files, {@current_batch.total_claims_charged} claims charged
+                        </div>
                       </button>
-
                     <% true -> %>
                       <button
                         disabled
@@ -739,60 +828,76 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                           <%= if @current_batch.status == "uploaded" do %>
                             Complete Stage 1 first
                           <% else %>
-                            <%= if @current_batch.status == "verifying", do: "Verifying...", else: "Translating..." %>
+                            {if @current_batch.status == "verifying",
+                              do: "Verifying...",
+                              else: "Translating..."}
                           <% end %>
                         </div>
                       </button>
                   <% end %>
                 </div>
               </div>
-
-              <!-- VERIFICATION RESULTS -->
+              
+    <!-- VERIFICATION RESULTS -->
               <%= if @current_batch.status in ["verifying", "verified", "translating", "translated"] do %>
                 <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <h3 class="text-sm font-semibold text-blue-900 mb-2">Verification Results:</h3>
                   <div class="grid grid-cols-3 gap-4 text-sm">
                     <div class="bg-white p-3 rounded border border-blue-200">
                       <div class="text-blue-600 font-medium">✓ Verified</div>
-                      <div class="text-2xl font-bold text-green-600"><%= @current_batch.verified_files %></div>
+                      <div class="text-2xl font-bold text-green-600">
+                        {@current_batch.verified_files}
+                      </div>
                     </div>
                     <div class="bg-white p-3 rounded border border-blue-200">
                       <div class="text-blue-600 font-medium">✗ Failed</div>
-                      <div class="text-2xl font-bold text-red-600"><%= @current_batch.failed_verification_files %></div>
+                      <div class="text-2xl font-bold text-red-600">
+                        {@current_batch.failed_verification_files}
+                      </div>
                     </div>
                     <div class="bg-white p-3 rounded border border-blue-200">
                       <div class="text-blue-600 font-medium">Total Claims</div>
-                      <div class="text-2xl font-bold text-blue-900"><%= @current_batch.total_claims %></div>
+                      <div class="text-2xl font-bold text-blue-900">
+                        {@current_batch.total_claims}
+                      </div>
                     </div>
                   </div>
                 </div>
               <% end %>
-
-              <!-- TRANSLATION RESULTS -->
+              
+    <!-- TRANSLATION RESULTS -->
               <%= if @current_batch.status in ["translating", "translated"] do %>
                 <div class="p-4 bg-green-50 rounded-lg border border-green-200">
                   <h3 class="text-sm font-semibold text-green-900 mb-2">Translation Results:</h3>
                   <div class="grid grid-cols-3 gap-4 text-sm">
                     <div class="bg-white p-3 rounded border border-green-200">
                       <div class="text-green-600 font-medium">✓ Translated</div>
-                      <div class="text-2xl font-bold text-green-600"><%= @current_batch.translated_files %></div>
+                      <div class="text-2xl font-bold text-green-600">
+                        {@current_batch.translated_files}
+                      </div>
                     </div>
                     <div class="bg-white p-3 rounded border border-green-200">
                       <div class="text-green-600 font-medium">✗ Failed</div>
-                      <div class="text-2xl font-bold text-red-600"><%= @current_batch.failed_translation_files %></div>
+                      <div class="text-2xl font-bold text-red-600">
+                        {@current_batch.failed_translation_files}
+                      </div>
                     </div>
                     <div class="bg-white p-3 rounded border border-green-200">
                       <div class="text-green-600 font-medium">Claims Charged</div>
                       <div class="text-xl font-bold text-green-900">
-                        <%= @current_batch.total_claims_charged %>
-                        <span class="text-sm font-normal text-green-700">($<%= :erlang.float_to_binary(@current_batch.total_claims_charged * 0.10, decimals: 2) %>)</span>
+                        {@current_batch.total_claims_charged}
+                        <span class="text-sm font-normal text-green-700">
+                          (${:erlang.float_to_binary(@current_batch.total_claims_charged * 0.10,
+                            decimals: 2
+                          )})
+                        </span>
                       </div>
                     </div>
                   </div>
                 </div>
               <% end %>
-
-              <!-- ACTION BUTTONS -->
+              
+    <!-- ACTION BUTTONS -->
               <div class="mt-4 flex gap-2">
                 <button
                   phx-click="view_batch"
@@ -813,8 +918,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
               </div>
             </div>
           <% end %>
-
-          <!-- Batches List -->
+          
+    <!-- Batches List -->
           <div class="bg-white shadow rounded-lg p-6">
             <div class="flex justify-between items-center mb-4">
               <h2 class="text-xl font-semibold text-gray-900">Recent Batches</h2>
@@ -824,8 +929,18 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   data-confirm="Are you sure you want to delete ALL batches? This cannot be undone."
                   class="group flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 shadow-sm hover:shadow"
                 >
-                  <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <svg
+                    class="w-4 h-4 group-hover:scale-110 transition-transform"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
                   </svg>
                   Clear All Batches
                 </button>
@@ -833,24 +948,26 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </div>
 
             <%= if length(@batches) == 0 do %>
-              <p class="text-gray-500 text-center py-8">No batches yet. Upload files to get started!</p>
+              <p class="text-gray-500 text-center py-8">
+                No batches yet. Upload files to get started!
+              </p>
             <% else %>
               <div class="space-y-4">
                 <%= for batch <- @batches do %>
                   <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
                     <div class="flex justify-between items-start">
                       <div class="flex-1">
-                        <h3 class="font-medium text-gray-900"><%= batch.name %></h3>
+                        <h3 class="font-medium text-gray-900">{batch.name}</h3>
                         <p class="text-sm text-gray-500">
-                          <%= Calendar.strftime(batch.inserted_at, "%Y-%m-%d %H:%M") %>
+                          {Calendar.strftime(batch.inserted_at, "%Y-%m-%d %H:%M")}
                         </p>
                       </div>
                       <div class="flex items-center gap-4">
                         <div class="text-right">
                           <div class="text-sm">
-                            <span class="text-green-600 font-medium"><%= batch.completed_files %></span> /
-                            <span class="text-red-600"><%= batch.failed_files %></span> /
-                            <span class="text-gray-600"><%= batch.total_files %></span>
+                            <span class="text-green-600 font-medium">{batch.completed_files}</span>
+                            / <span class="text-red-600">{batch.failed_files}</span>
+                            / <span class="text-gray-600">{batch.total_files}</span>
                           </div>
                           <div class="text-xs text-gray-500">Success / Failed / Total</div>
                         </div>
@@ -862,8 +979,18 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                               class="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1"
                               title="Download all successful conversions as ZIP"
                             >
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              <svg
+                                class="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  stroke-width="2"
+                                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                />
                               </svg>
                               ZIP
                             </button>
@@ -892,8 +1019,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             <% end %>
           </div>
         <% end %>
-
-        <!-- REMOTE IMPORT MODE -->
+        
+    <!-- REMOTE IMPORT MODE -->
         <%= if @processing_mode == :remote_import do %>
           <div class="mb-8 bg-white shadow rounded-lg p-6">
             <h2 class="text-xl font-semibold text-gray-900 mb-4">Remote Batch Import</h2>
@@ -929,17 +1056,37 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 disabled={@remote_status == :processing}
                 class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <%= if @remote_status == :processing, do: "⏳ Downloading and Processing...", else: "🚀 Fetch & Process" %>
+                {if @remote_status == :processing,
+                  do: "⏳ Downloading and Processing...",
+                  else: "🚀 Fetch & Process"}
               </button>
             </form>
-
-            <!-- Remote Processing Status -->
+            
+    <!-- Remote Processing Status -->
             <%= if @remote_status == :processing do %>
               <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <div class="flex items-center gap-3">
-                  <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <svg
+                    class="animate-spin h-5 w-5 text-blue-600"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      class="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      stroke-width="4"
+                    >
+                    </circle>
+                    <path
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    >
+                    </path>
                   </svg>
                   <div>
                     <p class="font-semibold text-blue-900">Downloading and processing...</p>
@@ -948,8 +1095,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 </div>
               </div>
             <% end %>
-
-            <!-- Remote Results -->
+            
+    <!-- Remote Results -->
             <%= if @remote_result do %>
               <div class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div class="flex justify-between items-start mb-4">
@@ -965,19 +1112,21 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 <div class="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span class="text-gray-600">Batch Name:</span>
-                    <span class="ml-2 font-semibold"><%= @remote_result.name %></span>
+                    <span class="ml-2 font-semibold">{@remote_result.name}</span>
                   </div>
                   <div>
                     <span class="text-gray-600">Total Files:</span>
-                    <span class="ml-2 font-semibold"><%= @remote_result.total_files %></span>
+                    <span class="ml-2 font-semibold">{@remote_result.total_files}</span>
                   </div>
                   <div>
                     <span class="text-gray-600">Successful:</span>
-                    <span class="ml-2 font-semibold text-green-600"><%= @remote_result.completed_files %></span>
+                    <span class="ml-2 font-semibold text-green-600">
+                      {@remote_result.completed_files}
+                    </span>
                   </div>
                   <div>
                     <span class="text-gray-600">Failed:</span>
-                    <span class="ml-2 font-semibold text-red-600"><%= @remote_result.failed_files %></span>
+                    <span class="ml-2 font-semibold text-red-600">{@remote_result.failed_files}</span>
                   </div>
                 </div>
 
@@ -990,8 +1139,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 </button>
               </div>
             <% end %>
-
-            <!-- Info Box -->
+            
+    <!-- Info Box -->
             <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm">
               <h4 class="font-semibold text-purple-900 mb-2">ℹ️ How it works:</h4>
               <ul class="space-y-1 text-purple-800 text-xs">
@@ -1006,8 +1155,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 <p class="text-purple-800 text-xs">Max file size: 100 MB | Timeout: 60 seconds</p>
               </div>
             </div>
-
-            <!-- Database Batches List (shared with upload mode) -->
+            
+    <!-- Database Batches List (shared with upload mode) -->
             <div class="mt-8 pt-8 border-t border-gray-200">
               <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-semibold text-gray-900">Recent Remote Imports</h3>
@@ -1017,32 +1166,44 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                     data-confirm="Are you sure you want to delete ALL batches? This cannot be undone."
                     class="group flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 font-medium rounded-lg border border-red-200 hover:bg-red-100 hover:border-red-300 transition-all duration-200 shadow-sm hover:shadow"
                   >
-                    <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    <svg
+                      class="w-4 h-4 group-hover:scale-110 transition-transform"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
                     </svg>
                     Clear All Batches
                   </button>
                 <% end %>
               </div>
               <%= if length(@batches) == 0 do %>
-                <p class="text-gray-500 text-center py-8">No remote imports yet. Enter a URL to get started!</p>
+                <p class="text-gray-500 text-center py-8">
+                  No remote imports yet. Enter a URL to get started!
+                </p>
               <% else %>
                 <div class="space-y-4">
                   <%= for batch <- Enum.filter(@batches, fn b -> String.starts_with?(b.name, "Remote Import") end) do %>
                     <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
                       <div class="flex justify-between items-start">
                         <div class="flex-1">
-                          <h3 class="font-medium text-gray-900"><%= batch.name %></h3>
+                          <h3 class="font-medium text-gray-900">{batch.name}</h3>
                           <p class="text-sm text-gray-500">
-                            <%= Calendar.strftime(batch.inserted_at, "%Y-%m-%d %H:%M") %>
+                            {Calendar.strftime(batch.inserted_at, "%Y-%m-%d %H:%M")}
                           </p>
                         </div>
                         <div class="flex items-center gap-4">
                           <div class="text-right">
                             <div class="text-sm">
-                              <span class="text-green-600 font-medium"><%= batch.completed_files %></span> /
-                              <span class="text-red-600"><%= batch.failed_files %></span> /
-                              <span class="text-gray-600"><%= batch.total_files %></span>
+                              <span class="text-green-600 font-medium">{batch.completed_files}</span>
+                              / <span class="text-red-600">{batch.failed_files}</span>
+                              / <span class="text-gray-600">{batch.total_files}</span>
                             </div>
                             <div class="text-xs text-gray-500">Success / Failed / Total</div>
                           </div>
@@ -1054,8 +1215,18 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                                 class="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center gap-1"
                                 title="Download all successful conversions as ZIP"
                               >
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                <svg
+                                  class="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                  />
                                 </svg>
                                 ZIP
                               </button>
@@ -1085,16 +1256,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </div>
           </div>
         <% end %>
-
-        <!-- Batch Detail Modal (for database batches) -->
+        
+    <!-- Batch Detail Modal (for database batches) -->
         <%= if @current_batch do %>
-          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" phx-click="close_batch">
-            <div class="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" phx-click="stop_propagation">
+          <div
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+            phx-click="close_batch"
+          >
+            <div
+              class="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+              phx-click="stop_propagation"
+            >
               <div class="p-6 border-b flex justify-between items-center">
                 <div>
-                  <h2 class="text-2xl font-bold text-gray-900"><%= @current_batch.name %></h2>
+                  <h2 class="text-2xl font-bold text-gray-900">{@current_batch.name}</h2>
                   <p class="text-sm text-gray-500">
-                    <%= @current_batch.completed_files + @current_batch.failed_files %> / <%= @current_batch.total_files %> processed
+                    {@current_batch.completed_files + @current_batch.failed_files} / {@current_batch.total_files} processed
                   </p>
                 </div>
                 <button
@@ -1102,12 +1279,17 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   class="text-gray-400 hover:text-gray-600"
                 >
                   <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
-
-              <!-- TWO-STAGE BUTTONS IN MODAL -->
+              
+    <!-- TWO-STAGE BUTTONS IN MODAL -->
               <%= if @current_batch.status in ["uploaded", "verifying", "verified", "translating", "translated"] do %>
                 <div class="p-6 border-b bg-gray-50">
                   <div class="flex gap-4 mb-4">
@@ -1127,12 +1309,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                           class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
                         >
                           <div class="text-lg">✓ Stage 1: Verified</div>
-                          <div class="text-xs mt-1"><%= @current_batch.verified_files %> files, <%= @current_batch.total_claims %> claims</div>
+                          <div class="text-xs mt-1">
+                            {@current_batch.verified_files} files, {@current_batch.total_claims} claims
+                          </div>
                         </button>
                       <% end %>
                     </div>
-
-                    <!-- STAGE 2: TRANSLATE BUTTON -->
+                    
+    <!-- STAGE 2: TRANSLATE BUTTON -->
                     <div class="flex-1">
                       <%= cond do %>
                         <% @current_batch.status == "verified" -> %>
@@ -1141,18 +1325,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                             class="w-full px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold shadow-lg transition-all animate-pulse"
                           >
                             <div class="text-lg">🚀 Stage 2: Translate Files</div>
-                            <div class="text-xs mt-1">Cost: $<%= :erlang.float_to_binary(@current_batch.total_claims * 0.10, decimals: 2) %> (<%= @current_batch.total_claims %> claims)</div>
+                            <div class="text-xs mt-1">
+                              Cost: ${:erlang.float_to_binary(@current_batch.total_claims * 0.10,
+                                decimals: 2
+                              )} ({@current_batch.total_claims} claims)
+                            </div>
                           </button>
-
                         <% @current_batch.status == "translated" -> %>
                           <button
                             disabled
                             class="w-full px-6 py-4 bg-green-100 text-green-800 rounded-lg font-semibold shadow border-2 border-green-300 cursor-not-allowed"
                           >
                             <div class="text-lg">✓ Stage 2: Translated</div>
-                            <div class="text-xs mt-1"><%= @current_batch.translated_files %> files, <%= @current_batch.total_claims_charged %> claims charged</div>
+                            <div class="text-xs mt-1">
+                              {@current_batch.translated_files} files, {@current_batch.total_claims_charged} claims charged
+                            </div>
                           </button>
-
                         <% true -> %>
                           <button
                             disabled
@@ -1163,29 +1351,37 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                               <%= if @current_batch.status == "uploaded" do %>
                                 Complete Stage 1 first
                               <% else %>
-                                <%= if @current_batch.status == "verifying", do: "Verifying...", else: "Translating..." %>
+                                {if @current_batch.status == "verifying",
+                                  do: "Verifying...",
+                                  else: "Translating..."}
                               <% end %>
                             </div>
                           </button>
                       <% end %>
                     </div>
                   </div>
-
-                  <!-- VERIFICATION SUMMARY -->
+                  
+    <!-- VERIFICATION SUMMARY -->
                   <%= if @current_batch.status in ["verified", "translating", "translated"] do %>
                     <div class="flex gap-3 text-sm">
                       <div class="flex-1 bg-white p-3 rounded border border-green-200">
                         <div class="text-green-600 font-medium text-xs">✓ Verified</div>
-                        <div class="text-xl font-bold text-green-700"><%= @current_batch.verified_files %></div>
+                        <div class="text-xl font-bold text-green-700">
+                          {@current_batch.verified_files}
+                        </div>
                       </div>
                       <div class="flex-1 bg-white p-3 rounded border border-gray-200">
                         <div class="text-gray-600 font-medium text-xs">Total Claims</div>
-                        <div class="text-xl font-bold text-blue-600"><%= @current_batch.total_claims %></div>
+                        <div class="text-xl font-bold text-blue-600">
+                          {@current_batch.total_claims}
+                        </div>
                       </div>
                       <%= if @current_batch.status in ["translating", "translated"] do %>
                         <div class="flex-1 bg-white p-3 rounded border border-blue-200">
                           <div class="text-blue-600 font-medium text-xs">🚀 Translated</div>
-                          <div class="text-xl font-bold text-blue-700"><%= @current_batch.translated_files %></div>
+                          <div class="text-xl font-bold text-blue-700">
+                            {@current_batch.translated_files}
+                          </div>
                         </div>
                       <% end %>
                     </div>
@@ -1199,25 +1395,31 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                     <div class="border border-gray-200 rounded-lg p-4">
                       <div class="flex justify-between items-center">
                         <div class="flex-1">
-                          <h4 class="font-medium text-gray-900"><%= job.original_filename %></h4>
-                          <p class="text-sm text-gray-500"><%= format_bytes(job.file_size) %></p>
+                          <h4 class="font-medium text-gray-900">{job.original_filename}</h4>
+                          <p class="text-sm text-gray-500">{format_bytes(job.file_size)}</p>
                         </div>
                         <div class="flex items-center gap-3">
                           <span class={"px-3 py-1 rounded-full text-sm " <> status_class(job.status)}>
-                            <%= String.upcase(job.status) %>
+                            {String.upcase(job.status)}
                           </span>
                           <%= if job.status == "verified" do %>
                             <span class="text-xs text-green-700">
-                              <%= job.claim_count %> claim(s) found
+                              {job.claim_count} claim(s) found
                             </span>
                           <% end %>
                           <%= if job.status in ["translated", "completed"] do %>
                             <button
-                              phx-click={if @viewing_job_id == to_string(job.id), do: "hide_job_json", else: "view_job_json"}
+                              phx-click={
+                                if @viewing_job_id == to_string(job.id),
+                                  do: "hide_job_json",
+                                  else: "view_job_json"
+                              }
                               phx-value-id={job.id}
                               class="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
                             >
-                              <%= if @viewing_job_id == to_string(job.id), do: "Hide Comparison", else: "View Side-by-Side" %>
+                              {if @viewing_job_id == to_string(job.id),
+                                do: "Hide Comparison",
+                                else: "View Side-by-Side"}
                             </button>
                             <button
                               phx-click="download_job"
@@ -1232,18 +1434,18 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                       <%= if job.verification_error do %>
                         <div class="mt-2 p-2 bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm rounded">
                           <div class="font-semibold">Verification Errors:</div>
-                          <%= job.verification_error %>
+                          {job.verification_error}
                         </div>
                       <% end %>
                       <%= if job.error_message do %>
                         <div class="mt-2 p-2 bg-red-50 text-red-700 text-sm rounded">
                           <div class="font-semibold">Translation Error:</div>
-                          <%= job.error_message %>
+                          {job.error_message}
                         </div>
                       <% end %>
                     </div>
-
-                    <!-- Side-by-Side Comparison Viewer Section -->
+                    
+    <!-- Side-by-Side Comparison Viewer Section -->
                     <%= if @viewing_job_id == to_string(job.id) && job.json_result do %>
                       <div class="mt-2 mx-4 mb-3 bg-gray-50 p-4 rounded border border-gray-300">
                         <div class="flex justify-between items-center mb-3">
@@ -1258,13 +1460,23 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                         <div class="grid grid-cols-2 gap-4">
                           <!-- X12 Content (Left) -->
                           <div class="flex flex-col">
-                            <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">Original X12 File:</h6>
-                            <pre class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1" style="color: black !important;"><%= job.x12_content || "X12 content not available" %></pre>
+                            <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">
+                              Original X12 File:
+                            </h6>
+                            <pre
+                              class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1"
+                              style="color: black !important;"
+                            ><%= job.x12_content || "X12 content not available" %></pre>
                           </div>
                           <!-- JSON Output (Right) -->
                           <div class="flex flex-col">
-                            <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">Converted JSON:</h6>
-                            <pre class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1" style="color: black !important;"><%= job.json_result %></pre>
+                            <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">
+                              Converted JSON:
+                            </h6>
+                            <pre
+                              class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1"
+                              style="color: black !important;"
+                            ><%= job.json_result %></pre>
                           </div>
                         </div>
                       </div>
@@ -1302,7 +1514,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   defp extract_zip_file(zip_path) do
     # Create a temporary directory for extraction
-    temp_dir = Path.join(System.tmp_dir!(), "x12_zip_#{:rand.uniform(999999)}")
+    temp_dir = Path.join(System.tmp_dir!(), "x12_zip_#{:rand.uniform(999_999)}")
     File.mkdir_p!(temp_dir)
 
     try do
@@ -1342,7 +1554,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     # Remove special characters and spaces, replace with underscores
     name
     |> String.replace(~r/[^a-zA-Z0-9\-_]/, "_")
-    |> String.slice(0..50)  # Limit length
+    # Limit length
+    |> String.slice(0..50)
   end
 
   defp status_class("uploaded"), do: "bg-gray-100 text-gray-800"
@@ -1365,24 +1578,49 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     |> Path.basename()
   end
 
-  defp format_remote_error(:invalid_url), do: "Invalid source. Please enter a valid HTTP/HTTPS URL, local file path, or Databricks path."
-  defp format_remote_error(:invalid_path), do: "File not found. Please check the file path and try again."
-  defp format_remote_error(:download_failed), do: "Failed to download file. Please check the URL and try again."
+  defp format_remote_error(:invalid_url),
+    do:
+      "Invalid source. Please enter a valid HTTP/HTTPS URL, local file path, or Databricks path."
+
+  defp format_remote_error(:invalid_path),
+    do: "File not found. Please check the file path and try again."
+
+  defp format_remote_error(:download_failed),
+    do: "Failed to download file. Please check the URL and try again."
+
   defp format_remote_error({:http_error, 404}), do: "File not found (404). Please verify the URL."
   defp format_remote_error({:http_error, 500}), do: "Server error (500). Please try again later."
   defp format_remote_error({:http_error, status}), do: "HTTP error (#{status}). Please try again."
-  defp format_remote_error(:timeout), do: "Download timed out. The file may be too large or the server is slow."
-  defp format_remote_error(:invalid_zip), do: "Invalid ZIP file. Please ensure the file is a valid ZIP archive."
-  defp format_remote_error(:no_x12_files), do: "No X12 files found in ZIP. Expected .x12, .edi, or .txt files."
+
+  defp format_remote_error(:timeout),
+    do: "Download timed out. The file may be too large or the server is slow."
+
+  defp format_remote_error(:invalid_zip),
+    do: "Invalid ZIP file. Please ensure the file is a valid ZIP archive."
+
+  defp format_remote_error(:no_x12_files),
+    do: "No X12 files found in ZIP. Expected .x12, .edi, or .txt files."
+
   defp format_remote_error(:file_too_large), do: "File exceeds maximum size of 100MB."
-  defp format_remote_error(:databricks_not_configured), do: "Databricks is not configured. Please set DATABRICKS_HOST and DATABRICKS_TOKEN environment variables."
-  defp format_remote_error({:databricks_error, status}), do: "Databricks API error (#{status}). Please check your credentials and path."
-  defp format_remote_error(:invalid_databricks_response), do: "Invalid response from Databricks API. Please check the file path."
+
+  defp format_remote_error(:databricks_not_configured),
+    do:
+      "Databricks is not configured. Please set DATABRICKS_HOST and DATABRICKS_TOKEN environment variables."
+
+  defp format_remote_error({:databricks_error, status}),
+    do: "Databricks API error (#{status}). Please check your credentials and path."
+
+  defp format_remote_error(:invalid_databricks_response),
+    do: "Invalid response from Databricks API. Please check the file path."
+
   defp format_remote_error(_), do: "An error occurred while processing the file."
 
   # Convert upload errors to human-readable strings
   defp error_to_string(:too_large), do: "File is too large (max 10MB)"
-  defp error_to_string(:not_accepted), do: "File type not accepted (use .x12, .edi, .txt, or .zip)"
+
+  defp error_to_string(:not_accepted),
+    do: "File type not accepted (use .x12, .edi, .txt, or .zip)"
+
   defp error_to_string(:too_many_files), do: "Too many files (max 50)"
   defp error_to_string(:external_client_failure), do: "Upload failed - please try again"
   defp error_to_string(error), do: "Upload error: #{inspect(error)}"

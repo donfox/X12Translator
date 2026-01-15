@@ -14,9 +14,10 @@ defmodule X12Bridge.Conversions do
   Creates a new batch and triggers automatic cleanup of old batches.
   """
   def create_batch(attrs \\ %{}) do
-    with {:ok, batch} <- %Batch{}
-                         |> Batch.changeset(attrs)
-                         |> Repo.insert() do
+    with {:ok, batch} <-
+           %Batch{}
+           |> Batch.changeset(attrs)
+           |> Repo.insert() do
       # Automatically cleanup old batches after creating a new one
       cleanup_old_batches()
       {:ok, batch}
@@ -83,9 +84,10 @@ defmodule X12Bridge.Conversions do
       cleanup_old_batches(keep: 100)  # Keep 100 most recent
   """
   def cleanup_old_batches(opts \\ []) do
-    max_batches = Keyword.get(opts, :keep) ||
-                  Application.get_env(:x12_bridge, :batch_retention)[:max_batches] ||
-                  50
+    max_batches =
+      Keyword.get(opts, :keep) ||
+        Application.get_env(:x12_bridge, :batch_retention)[:max_batches] ||
+        50
 
     # Get IDs of batches to keep (most recent N)
     batch_ids_to_keep =
@@ -153,42 +155,45 @@ defmodule X12Bridge.Conversions do
     # STEP 1: Perform round-trip validation FIRST
     validation_result = RoundtripValidator.validate(file_content)
 
-    result = if validation_result.valid? do
-      # STEP 2: Round-trip validation passed, proceed with conversion
-      case Converter.convert_content(file_content) do
-        {:ok, json} ->
-          %{
-            status: "completed",
-            json_result: json,
-            processing_time_ms: System.monotonic_time(:millisecond) - start_time,
-            roundtrip_valid: true,
-            roundtrip_diff: nil,
-            roundtrip_error: nil
-          }
+    result =
+      if validation_result.valid? do
+        # STEP 2: Round-trip validation passed, proceed with conversion
+        case Converter.convert_content(file_content) do
+          {:ok, json} ->
+            %{
+              status: "completed",
+              json_result: json,
+              processing_time_ms: System.monotonic_time(:millisecond) - start_time,
+              roundtrip_valid: true,
+              roundtrip_diff: nil,
+              roundtrip_error: nil
+            }
 
-        {:error, reason} ->
-          %{
-            status: "failed",
-            error_message: inspect(reason),
-            processing_time_ms: System.monotonic_time(:millisecond) - start_time,
-            roundtrip_valid: false,
-            roundtrip_diff: nil,
-            roundtrip_error: "Conversion failed: #{inspect(reason)}"
-          }
+          {:error, reason} ->
+            %{
+              status: "failed",
+              error_message: inspect(reason),
+              processing_time_ms: System.monotonic_time(:millisecond) - start_time,
+              roundtrip_valid: false,
+              roundtrip_diff: nil,
+              roundtrip_error: "Conversion failed: #{inspect(reason)}"
+            }
+        end
+      else
+        # STEP 3: Round-trip validation FAILED - block conversion
+        formatted_diff = RoundtripValidator.format_result(validation_result)
+
+        %{
+          status: "failed",
+          error_message:
+            "Round-trip validation failed - X12 cannot be perfectly reconstructed from JSON",
+          processing_time_ms: System.monotonic_time(:millisecond) - start_time,
+          roundtrip_valid: false,
+          roundtrip_diff: formatted_diff,
+          roundtrip_error:
+            validation_result.error_message || "X12 reconstruction differs from original"
+        }
       end
-    else
-      # STEP 3: Round-trip validation FAILED - block conversion
-      formatted_diff = RoundtripValidator.format_result(validation_result)
-
-      %{
-        status: "failed",
-        error_message: "Round-trip validation failed - X12 cannot be perfectly reconstructed from JSON",
-        processing_time_ms: System.monotonic_time(:millisecond) - start_time,
-        roundtrip_valid: false,
-        roundtrip_diff: formatted_diff,
-        roundtrip_error: validation_result.error_message || "X12 reconstruction differs from original"
-      }
-    end
 
     {:ok, result}
   end
@@ -201,24 +206,32 @@ defmodule X12Bridge.Conversions do
     batch = get_batch!(batch_id)
     update_batch(batch, %{status: "processing"})
 
-    # Process each file
-    Enum.each(uploaded_files, fn {job_id, file_content} ->
-      job = get_job!(job_id)
-      update_job(job, %{status: "processing", progress: 50})
+    # Process each file concurrently with controlled concurrency
+    max_concurrency = Application.get_env(:x12_bridge, :batch_max_concurrency, 8)
 
-      # Process the file
-      {:ok, result} = process_file_sync(file_content, job.original_filename)
+    uploaded_files
+    |> Task.async_stream(
+      fn {job_id, file_content} ->
+        job = get_job!(job_id)
+        update_job(job, %{status: "processing", progress: 50})
 
-      # Update job with results including original X12 content
-      update_job(job, result |> Map.put(:progress, 100) |> Map.put(:x12_content, file_content))
+        # Process the file
+        {:ok, result} = process_file_sync(file_content, job.original_filename)
 
-      # Broadcast progress update
-      Phoenix.PubSub.broadcast(
-        X12Bridge.PubSub,
-        "batch:#{batch_id}",
-        {:job_completed, job.id, result.status}
-      )
-    end)
+        # Update job with results including original X12 content
+        update_job(job, result |> Map.put(:progress, 100) |> Map.put(:x12_content, file_content))
+
+        # Broadcast progress update
+        Phoenix.PubSub.broadcast(
+          X12Bridge.PubSub,
+          "batch:#{batch_id}",
+          {:job_completed, job.id, result.status}
+        )
+      end,
+      max_concurrency: max_concurrency,
+      timeout: :infinity
+    )
+    |> Stream.run()
 
     # Update batch status
     completed_jobs = count_jobs_by_status(batch_id, "completed")
@@ -302,10 +315,11 @@ defmodule X12Bridge.Conversions do
     failed_verification_count = count_jobs_by_status(batch_id, "failed_verification")
 
     # Calculate total claims from verified jobs
-    total_claims = Job
-    |> where([j], j.batch_id == ^batch_id and j.status == "verified")
-    |> select([j], sum(j.claim_count))
-    |> Repo.one() || 0
+    total_claims =
+      Job
+      |> where([j], j.batch_id == ^batch_id and j.status == "verified")
+      |> select([j], sum(j.claim_count))
+      |> Repo.one() || 0
 
     update_batch(batch, %{
       status: "verified",
@@ -338,9 +352,10 @@ defmodule X12Bridge.Conversions do
     update_batch(batch, %{status: "translating"})
 
     # Get only verified jobs
-    verified_jobs = Job
-    |> where([j], j.batch_id == ^batch_id and j.status == "verified")
-    |> Repo.all()
+    verified_jobs =
+      Job
+      |> where([j], j.batch_id == ^batch_id and j.status == "verified")
+      |> Repo.all()
 
     # Translate each verified file
     Enum.each(verified_jobs, fn job ->
@@ -369,7 +384,8 @@ defmodule X12Bridge.Conversions do
                 roundtrip_diff: nil,
                 roundtrip_error: nil,
                 translated_at: DateTime.utc_now(),
-                claims_charged: job.claim_count  # Charge for successful translation
+                # Charge for successful translation
+                claims_charged: job.claim_count
               })
 
               # Broadcast success
@@ -389,7 +405,8 @@ defmodule X12Bridge.Conversions do
                 roundtrip_valid: false,
                 roundtrip_error: "Conversion failed: #{inspect(reason)}",
                 translated_at: DateTime.utc_now(),
-                claims_charged: 0  # No charge for failed translation
+                # No charge for failed translation
+                claims_charged: 0
               })
 
               # Broadcast failure
@@ -410,9 +427,11 @@ defmodule X12Bridge.Conversions do
             processing_time_ms: processing_time,
             roundtrip_valid: false,
             roundtrip_diff: formatted_diff,
-            roundtrip_error: validation_result.error_message || "X12 reconstruction differs from original",
+            roundtrip_error:
+              validation_result.error_message || "X12 reconstruction differs from original",
             translated_at: DateTime.utc_now(),
-            claims_charged: 0  # No charge for failed translation
+            # No charge for failed translation
+            claims_charged: 0
           })
 
           # Broadcast failure
@@ -430,10 +449,11 @@ defmodule X12Bridge.Conversions do
     failed_translation_count = count_jobs_by_status(batch_id, "failed_translation")
 
     # Calculate total claims charged (only for successful translations)
-    total_claims_charged = Job
-    |> where([j], j.batch_id == ^batch_id and j.status == "translated")
-    |> select([j], sum(j.claims_charged))
-    |> Repo.one() || 0
+    total_claims_charged =
+      Job
+      |> where([j], j.batch_id == ^batch_id and j.status == "translated")
+      |> select([j], sum(j.claims_charged))
+      |> Repo.one() || 0
 
     update_batch(batch, %{
       status: "translated",
@@ -449,7 +469,8 @@ defmodule X12Bridge.Conversions do
     Phoenix.PubSub.broadcast(
       X12Bridge.PubSub,
       "batch:#{batch_id}",
-      {:batch_translated, batch_id, translated_count, failed_translation_count, total_claims_charged}
+      {:batch_translated, batch_id, translated_count, failed_translation_count,
+       total_claims_charged}
     )
 
     {:ok, get_batch!(batch_id)}

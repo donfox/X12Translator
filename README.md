@@ -267,8 +267,6 @@ This project is currently unlicensed. Contact the owner for usage rights.
 - ⏳ REST API endpoints
 - ⏳ Background job processing (Oban)
 
-See [CODE_REVIEW_REPORT.md](docs/archive/CODE_REVIEW_REPORT.md) for detailed assessment.
-
 ---
 
 ## Contributing

@@ -1,11 +1,16 @@
 import Config
 
 # Configure your database
+# Uses standard PostgreSQL environment variables with sensible defaults.
+# If you have postgres/postgres setup, no configuration needed!
+# For custom credentials, set these environment variables:
+#   PGUSER, PGPASSWORD, PGHOST, PGPORT, PGDATABASE
 config :x12_bridge, X12Bridge.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "x12_bridge_dev",
+  username: System.get_env("PGUSER") || "postgres",
+  password: System.get_env("PGPASSWORD") || "postgres",
+  hostname: System.get_env("PGHOST") || "localhost",
+  port: String.to_integer(System.get_env("PGPORT") || "5432"),
+  database: System.get_env("PGDATABASE") || "x12_bridge_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10

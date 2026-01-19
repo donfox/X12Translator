@@ -8,15 +8,27 @@ A focused, single-purpose Elixir application that parses and validates X12 EDI f
 
 ## Quick Start
 
+### First Time Setup (Fresh Clone)
+
 ```bash
-# 1. Install dependencies and setup database
+# 1. Install dependencies
+mix deps.get
+
+# 2. Setup database and assets
 mix setup
 
-# 2. Start the server
+# 3. Start the server
 mix phx.server
 
-# 3. Open in browser
+# 4. Open in browser
 open http://localhost:4000/converter
+```
+
+### Subsequent Starts
+
+```bash
+# Just start the server
+mix phx.server
 ```
 
 That's it! Load a sample file and convert to JSON.

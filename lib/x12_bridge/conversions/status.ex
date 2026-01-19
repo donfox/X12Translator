@@ -66,7 +66,6 @@ defmodule X12Bridge.Conversions.Status do
   ]
 
   @all_statuses (@job_statuses ++ @batch_statuses) |> Enum.uniq()
-  @all_statuses_strings Enum.map(@all_statuses, &to_string/1)
 
   @doc """
   List all valid job statuses as atoms.

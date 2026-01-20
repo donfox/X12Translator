@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Don Fox
+# Licensed under the MIT License. See LICENSE file in the project root.
+
 defmodule X12Bridge.BatchProcessor do
   @moduledoc """
   Batch processor for X12 files used in testing.
@@ -55,7 +58,10 @@ defmodule X12Bridge.BatchProcessor do
     with true <- File.exists?(test_batch_dir),
          {:ok, files} <- scan_directory(test_batch_dir, "*.x12"),
          {:ok, result} <- process_files_to_database(files, batch_name, config) do
-      Logger.info("Test batch #{batch_name} completed: #{result.successful_files}/#{result.total_files} successful")
+      Logger.info(
+        "Test batch #{batch_name} completed: #{result.successful_files}/#{result.total_files} successful"
+      )
+
       {:ok, result}
     else
       false ->
@@ -83,32 +89,37 @@ defmodule X12Bridge.BatchProcessor do
     total_files = length(file_paths)
 
     # Create batch in database
-    {:ok, batch} = Conversions.create_batch(%{
-      name: batch_name,
-      total_files: total_files,
-      completed_files: 0,
-      failed_files: 0,
-      status: "processing"
-    })
+    {:ok, batch} =
+      Conversions.create_batch(%{
+        name: batch_name,
+        total_files: total_files,
+        completed_files: 0,
+        failed_files: 0,
+        status: "processing"
+      })
 
-    Logger.info("Processing batch #{batch.id} with #{total_files} files (max concurrency: #{config.max_concurrency})")
+    Logger.info(
+      "Processing batch #{batch.id} with #{total_files} files (max concurrency: #{config.max_concurrency})"
+    )
 
     # Read all files into memory
     uploaded_files =
       file_paths
       |> Enum.map(fn file_path ->
         filename = Path.basename(file_path)
+
         case File.read(file_path) do
           {:ok, content} ->
             file_size = byte_size(content)
 
             # Create job in database
-            {:ok, job} = Conversions.create_job(%{
-              batch_id: batch.id,
-              original_filename: filename,
-              file_size: file_size,
-              status: "pending"
-            })
+            {:ok, job} =
+              Conversions.create_job(%{
+                batch_id: batch.id,
+                original_filename: filename,
+                file_size: file_size,
+                status: "pending"
+              })
 
             {job.id, content}
 
@@ -116,13 +127,14 @@ defmodule X12Bridge.BatchProcessor do
             Logger.error("Failed to read #{filename}: #{inspect(reason)}")
 
             # Create failed job
-            {:ok, job} = Conversions.create_job(%{
-              batch_id: batch.id,
-              original_filename: filename,
-              file_size: 0,
-              status: "failed",
-              error_message: "Failed to read file: #{inspect(reason)}"
-            })
+            {:ok, job} =
+              Conversions.create_job(%{
+                batch_id: batch.id,
+                original_filename: filename,
+                file_size: 0,
+                status: "failed",
+                error_message: "Failed to read file: #{inspect(reason)}"
+              })
 
             {job.id, nil}
         end

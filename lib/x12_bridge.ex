@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Don Fox
+# Licensed under the MIT License. See LICENSE file in the project root.
+
 defmodule X12Bridge do
   @moduledoc """
   X12Bridge keeps the contexts that define your domain

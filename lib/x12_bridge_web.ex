@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Don Fox
+# Licensed under the MIT License. See LICENSE file in the project root.
+
 defmodule X12BridgeWeb do
   @moduledoc """
   The entrypoint for defining your web interface, such

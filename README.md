@@ -1,5 +1,7 @@
 # X12Bridge
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 **Convert X12 EDI healthcare claims (837P/I/D) to clean, semantic JSON.**
 
 A focused, single-purpose Elixir application that parses and validates X12 EDI files, converting them into developer-friendly JSON format.
@@ -218,7 +220,9 @@ MIX_ENV=prod mix release          # Build release
 - PostgreSQL 14+
 - Node.js 18+ (for assets)
 
-See [GUIDE.md](docs/GUIDE.md) for detailed installation instructions.
+**Platform-Specific Setup:**
+- **Windows:** See [WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md) for detailed Windows (native & WSL) instructions
+- **macOS/Linux:** See [SETUP_TROUBLESHOOTING.md](docs/SETUP_TROUBLESHOOTING.md) for common issues
 
 ### Running Tests
 
@@ -284,6 +288,14 @@ This project is currently unlicensed. Contact the owner for usage rights.
 ## Contributing
 
 This is currently a solo project. If you'd like to contribute or use this commercially, please contact the owner.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 Don Fox
 
 ---
 

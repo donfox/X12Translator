@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Don Fox
+# Licensed under the MIT License. See LICENSE file in the project root.
+
 defmodule X12Bridge.X12.Parser do
   @moduledoc """
   X12 EDI Parser
@@ -237,6 +240,7 @@ defmodule X12Bridge.X12.Parser do
             has_sv_in_current_line =
               if length(acc.current_claim.service_lines) > 0 do
                 [current_line | _] = acc.current_claim.service_lines
+
                 Enum.any?(current_line.line_segments, fn seg ->
                   seg.id in ["SV1", "SV2", "SV3"]
                 end)
@@ -247,7 +251,8 @@ defmodule X12Bridge.X12.Parser do
             if has_sv_in_current_line do
               # Current line already has an SV segment, start a new line
               new_service_line = %{
-                line_segment: nil,  # No LX segment for implicit lines
+                # No LX segment for implicit lines
+                line_segment: nil,
                 line_segments: [segment]
               }
 

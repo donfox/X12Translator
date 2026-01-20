@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Don Fox
+# Licensed under the MIT License. See LICENSE file in the project root.
+
 defmodule X12Bridge.Application do
   # See https://hexdocs.pm/elixir/Application.html
   # for more information on OTP Applications

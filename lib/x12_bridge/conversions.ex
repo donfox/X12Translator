@@ -3,10 +3,12 @@ defmodule X12Bridge.Conversions do
   The Conversions context handles batch processing and job tracking.
   """
 
+  require Logger
+
   import Ecto.Query
   alias X12Bridge.Repo
   alias X12Bridge.Conversions.{Batch, Job}
-  alias X12Bridge.X12.{Converter, RoundtripValidator, Verifier}
+  alias X12Bridge.X12.{ClaimSplitter, Converter, RoundtripValidator, Verifier}
 
   ## Batch functions
 
@@ -357,10 +359,25 @@ defmodule X12Bridge.Conversions do
       |> where([j], j.batch_id == ^batch_id and j.status == "verified")
       |> Repo.all()
 
+    # Expand multi-claim jobs: each claim becomes its own DB job so the UI
+    # can show per-claim side-by-side comparison after translation.
+    {jobs_to_translate, files_to_translate} =
+      expand_multi_claim_jobs(batch_id, verified_jobs, uploaded_files)
+
+    # If jobs were expanded, update the batch total_files to match reality
+    if length(jobs_to_translate) != length(verified_jobs) do
+      total_jobs =
+        Job
+        |> where([j], j.batch_id == ^batch_id)
+        |> Repo.aggregate(:count)
+
+      update_batch(get_batch!(batch_id), %{total_files: total_jobs})
+    end
+
     # Translate each verified file
-    Enum.each(verified_jobs, fn job ->
+    Enum.each(jobs_to_translate, fn job ->
       # Find the file content for this job
-      file_content = Map.get(uploaded_files, job.id)
+      file_content = Map.get(files_to_translate, job.id)
 
       if file_content do
         update_job(job, %{status: "translating"})
@@ -474,6 +491,66 @@ defmodule X12Bridge.Conversions do
     )
 
     {:ok, get_batch!(batch_id)}
+  end
+
+  # For each verified job that contains multiple claims, split it into N
+  # individual single-claim jobs.  The original multi-claim job is deleted
+  # and replaced by N new jobs (status "verified", claim_count 1) so that
+  # the translation loop — and the UI — sees one job per claim.
+  #
+  # Returns {expanded_job_list, updated_files_map}.
+  defp expand_multi_claim_jobs(batch_id, verified_jobs, uploaded_files) do
+    Enum.reduce(verified_jobs, {[], uploaded_files}, fn job, {acc_jobs, acc_files} ->
+      file_content = Map.get(acc_files, job.id) || job.x12_content
+
+      if job.claim_count > 1 && file_content do
+        case ClaimSplitter.split_claims_to_x12(file_content) do
+          {:ok, claims} when claims != nil ->
+            Logger.info(
+              "Splitting job #{job.original_filename} into #{length(claims)} per-claim jobs"
+            )
+
+            # Remove original job from the files map and delete it from the DB
+            acc_files = Map.delete(acc_files, job.id)
+            Repo.delete!(job)
+
+            # Create one new job per claim, accumulating both jobs and files
+            Enum.reduce(
+              claims,
+              {acc_jobs, acc_files},
+              fn %{claim_id: claim_id, x12_content: x12_content}, {jobs, files} ->
+                filename = build_split_filename(job.original_filename, claim_id)
+
+                {:ok, new_job} =
+                  create_job(%{
+                    batch_id: batch_id,
+                    original_filename: filename,
+                    file_size: byte_size(x12_content),
+                    status: "verified",
+                    x12_content: x12_content,
+                    claim_count: 1,
+                    verified_at: job.verified_at
+                  })
+
+                {jobs ++ [new_job], Map.put(files, new_job.id, x12_content)}
+              end
+            )
+
+          _ ->
+            # Split failed or returned nil — keep original job unchanged
+            {acc_jobs ++ [job], acc_files}
+        end
+      else
+        {acc_jobs ++ [job], acc_files}
+      end
+    end)
+  end
+
+  # Builds a per-claim filename from the original file and the CLM id.
+  # e.g. "multi_claim_837p.x12" + "CLM-900001" → "multi_claim_837p_CLM-900001.x12"
+  defp build_split_filename(original_filename, claim_id) do
+    base = String.replace(original_filename, ~r/\.(x12|edi|txt)$/i, "")
+    "#{base}_#{claim_id}.x12"
   end
 
   defp count_jobs_by_status(batch_id, status) do

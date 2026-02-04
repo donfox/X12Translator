@@ -23,6 +23,7 @@ defmodule X12Bridge.OutputWriter do
   require Logger
 
   alias X12Bridge.Conversions
+  alias X12Bridge.X12.ClaimSplitter
 
   @output_subdir "output"
 
@@ -84,11 +85,8 @@ defmodule X12Bridge.OutputWriter do
       {:ok, %{written: 0, failed: 0, paths: []}}
     else
       results =
-        Enum.map(translated_jobs, fn job ->
-          case write_json(source_dir, job.original_filename, job.json_result) do
-            {:ok, path} -> {:ok, path}
-            {:error, reason} -> {:error, {job.original_filename, reason}}
-          end
+        Enum.flat_map(translated_jobs, fn job ->
+          write_job_output(source_dir, job)
         end)
 
       written = Enum.filter(results, &match?({:ok, _}, &1))
@@ -175,6 +173,62 @@ defmodule X12Bridge.OutputWriter do
   def output_dir(nil), do: nil
 
   # Private functions
+
+  # Writes output for a single job. If the job's X12 content contains
+  # multiple claims, splits them into individual JSON files.
+  # Returns a list of {:ok, path} / {:error, reason} tuples.
+  defp write_job_output(source_dir, job) do
+    case maybe_split_claims(job) do
+      {:ok, nil} ->
+        # Single claim or no x12_content: write the full json_result as one file
+        [
+          case write_json(source_dir, job.original_filename, job.json_result) do
+            {:ok, path} -> {:ok, path}
+            {:error, reason} -> {:error, {job.original_filename, reason}}
+          end
+        ]
+
+      {:ok, claims} ->
+        # Multi-claim: write one file per claim
+        Enum.map(claims, fn %{claim_id: claim_id, json: json} ->
+          filename = to_split_claim_filename(job.original_filename, claim_id)
+          case write_json(source_dir, filename, json) do
+            {:ok, path} -> {:ok, path}
+            {:error, reason} -> {:error, {filename, reason}}
+          end
+        end)
+
+      {:error, _reason} ->
+        # Splitting failed - fall back to writing the full json_result
+        Logger.warning("Claim splitting failed for #{job.original_filename}, writing full JSON")
+        [
+          case write_json(source_dir, job.original_filename, job.json_result) do
+            {:ok, path} -> {:ok, path}
+            {:error, reason} -> {:error, {job.original_filename, reason}}
+          end
+        ]
+    end
+  end
+
+  # Attempts to split a job's X12 content into individual claims.
+  # Returns {:ok, [claims]} if multi-claim, {:ok, nil} if single-claim or no content.
+  defp maybe_split_claims(job) do
+    if job.x12_content do
+      ClaimSplitter.split_claims(job.x12_content)
+    else
+      {:ok, nil}
+    end
+  end
+
+  # Builds filename for a split claim: "original_base_claimID.json"
+  # e.g. "multi_claim_837p.x12" + "CLM-900001" -> "multi_claim_837p_CLM-900001.json"
+  defp to_split_claim_filename(original_filename, claim_id) do
+    base =
+      original_filename
+      |> String.replace(~r/\.(x12|edi|txt)$/i, "")
+
+    "#{base}_#{claim_id}.json"
+  end
 
   defp ensure_output_dir(output_dir) do
     case File.mkdir_p(output_dir) do

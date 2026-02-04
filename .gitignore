@@ -22,6 +22,9 @@ erl_crash.dump
 # Temporary files, for example, from tests.
 /tmp/
 
+# Generated JSON output from batch processing (OutputWriter artifacts)
+test/fixtures/batch_input/output/
+
 # Ignore package tarball (built via "mix hex.build").
 x12_bridge-*.tar
 

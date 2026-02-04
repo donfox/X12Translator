@@ -72,6 +72,37 @@ Hooks.RemoteUrlInput = {
   }
 }
 
+Hooks.SyncScroll = {
+  mounted() {
+    // Find both scrollable panels within this container
+    const panels = this.el.querySelectorAll('[data-sync-scroll]')
+    if (panels.length !== 2) return
+
+    let isSyncing = false
+
+    panels.forEach((panel, index) => {
+      panel.addEventListener('scroll', () => {
+        if (isSyncing) return
+        isSyncing = true
+
+        const otherPanel = panels[index === 0 ? 1 : 0]
+
+        // Calculate scroll percentage
+        const scrollPercentage = panel.scrollTop / (panel.scrollHeight - panel.clientHeight)
+
+        // Apply same percentage to other panel
+        const otherScrollTop = scrollPercentage * (otherPanel.scrollHeight - otherPanel.clientHeight)
+        otherPanel.scrollTop = otherScrollTop
+
+        // Reset sync flag after a small delay to allow smooth scrolling
+        requestAnimationFrame(() => {
+          isSyncing = false
+        })
+      })
+    })
+  }
+}
+
 Hooks.X12Textarea = {
   mounted() {
     console.log("✅ X12Textarea hook MOUNTED on element:", this.el.id)

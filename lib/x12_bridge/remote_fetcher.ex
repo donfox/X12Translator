@@ -21,11 +21,13 @@ defmodule X12Bridge.RemoteFetcher do
   require Logger
 
   @doc """
-  Fetches a ZIP archive from various sources and extracts X12 files.
+  Fetches X12 files from various sources.
 
   Supports:
     * HTTP/HTTPS URLs (e.g., "https://example.com/batch.zip")
-    * Local file paths (e.g., "/path/to/batch.zip")
+    * Local ZIP files (e.g., "/path/to/batch.zip")
+    * Local directories (e.g., "/path/to/x12_files/")
+    * Local single X12 files (e.g., "/path/to/claim.x12")
     * Databricks paths (e.g., "/mnt/data/x12/batch.zip") - requires Databricks config
 
   ## Options
@@ -36,17 +38,19 @@ defmodule X12Bridge.RemoteFetcher do
   ## Returns
 
     * `{:ok, result}` where result contains:
-      * `:files` - List of absolute paths to extracted X12 files
+      * `:files` - List of absolute paths to X12 files
       * `:manifest` - Parsed manifest.json map if present, nil otherwise
       * `:temp_dir` - Temporary directory path (caller must clean up via cleanup_temp_files/1)
+                      For local directories/files, this is nil (no cleanup needed)
+      * `:source_dir` - The source directory for output (where JSON should be written back)
 
     * `{:error, reason}` where reason is:
       * `:invalid_url` - URL format invalid or non-HTTP(S)
-      * `:invalid_path` - Local file path does not exist
+      * `:invalid_path` - Local file/directory path does not exist
       * `:download_failed` - Network error or timeout
       * `{:http_error, status_code}` - Non-200 HTTP response
       * `:invalid_zip` - Not a valid ZIP file
-      * `:no_x12_files` - ZIP contains no X12 files
+      * `:no_x12_files` - No X12 files found
       * `:file_too_large` - File exceeds max_size limit
       * `:databricks_not_configured` - Databricks API credentials not configured
 
@@ -56,8 +60,14 @@ defmodule X12Bridge.RemoteFetcher do
       :http_url ->
         fetch_from_http(source, opts)
 
-      :local_file ->
-        fetch_from_local(source, opts)
+      :local_directory ->
+        fetch_from_local_directory(source, opts)
+
+      :local_zip ->
+        fetch_from_local_zip(source, opts)
+
+      :local_x12_file ->
+        fetch_from_local_x12(source, opts)
 
       :databricks_path ->
         fetch_from_databricks(source, opts)
@@ -76,7 +86,13 @@ defmodule X12Bridge.RemoteFetcher do
       :http_url
 
       iex> X12Bridge.RemoteFetcher.detect_source_type("/Users/name/file.zip")
-      :local_file
+      :local_zip
+
+      iex> X12Bridge.RemoteFetcher.detect_source_type("/Users/name/x12_files/")
+      :local_directory
+
+      iex> X12Bridge.RemoteFetcher.detect_source_type("/Users/name/claim.x12")
+      :local_x12_file
 
       iex> X12Bridge.RemoteFetcher.detect_source_type("/mnt/data/x12/file.zip")
       :databricks_path
@@ -92,13 +108,9 @@ defmodule X12Bridge.RemoteFetcher do
       String.starts_with?(source, "/mnt/") or String.starts_with?(source, "dbfs:/") ->
         :databricks_path
 
-      # Local file path (absolute) - Unix or Windows
-      String.starts_with?(source, "/") or String.match?(source, ~r/^[A-Za-z]:[\\\/]/) ->
-        :local_file
-
-      # Local file path (relative) - if it contains path separators and looks like a file
-      String.contains?(source, "/") or String.contains?(source, "\\") ->
-        :local_file
+      # Local path - determine if it's a directory, ZIP, or X12 file
+      is_local_path?(source) ->
+        detect_local_type(source)
 
       # Invalid (single words, empty strings, etc.)
       true ->
@@ -107,6 +119,50 @@ defmodule X12Bridge.RemoteFetcher do
   end
 
   def detect_source_type(_), do: :invalid
+
+  # Check if source looks like a local file path
+  defp is_local_path?(source) do
+    # Absolute Unix path
+    String.starts_with?(source, "/") or
+      # Absolute Windows path
+      String.match?(source, ~r/^[A-Za-z]:[\\\/]/) or
+      # Relative path with separators
+      String.contains?(source, "/") or String.contains?(source, "\\")
+  end
+
+  # Detect the specific type of local source
+  defp detect_local_type(source) do
+    cond do
+      # Check if it's an existing directory
+      File.dir?(source) ->
+        :local_directory
+
+      # Check if it's a ZIP file (by extension)
+      String.ends_with?(String.downcase(source), ".zip") ->
+        :local_zip
+
+      # Check if it's an X12/EDI file (by extension)
+      is_x12_extension?(source) ->
+        :local_x12_file
+
+      # If file exists but unknown extension, try to detect
+      File.exists?(source) ->
+        if File.dir?(source), do: :local_directory, else: :local_x12_file
+
+      # Path doesn't exist yet - guess based on extension or trailing slash
+      String.ends_with?(source, "/") or String.ends_with?(source, "\\") ->
+        :local_directory
+
+      true ->
+        # Default to treating as a potential file path (will error if not found)
+        :local_x12_file
+    end
+  end
+
+  defp is_x12_extension?(path) do
+    ext = Path.extname(path) |> String.downcase()
+    ext in [".x12", ".edi", ".txt"]
+  end
 
   # Fetch from HTTP/HTTPS URL
   defp fetch_from_http(url, opts) do
@@ -121,16 +177,18 @@ defmodule X12Bridge.RemoteFetcher do
        %{
          files: x12_files,
          manifest: manifest,
-         temp_dir: temp_dir
+         temp_dir: temp_dir,
+         # No local source directory for HTTP sources (output not written back)
+         source_dir: nil
        }}
     else
       {:error, _reason} = error -> error
     end
   end
 
-  # Fetch from local file system
-  defp fetch_from_local(file_path, opts) do
-    Logger.info("Reading local file: #{file_path}")
+  # Fetch from local ZIP file
+  defp fetch_from_local_zip(file_path, opts) do
+    Logger.info("Reading local ZIP file: #{file_path}")
 
     with {:ok, config} <- get_config(opts),
          {:ok, _} <- validate_local_file(file_path, config.max_size),
@@ -143,15 +201,113 @@ defmodule X12Bridge.RemoteFetcher do
        %{
          files: x12_files,
          manifest: manifest,
-         temp_dir: temp_dir
+         temp_dir: temp_dir,
+         # Source directory is the directory containing the ZIP file
+         source_dir: Path.expand(file_path) |> Path.dirname()
        }}
     else
       {:error, :enoent} ->
-        Logger.error("Local file not found: #{file_path}")
+        Logger.error("Local ZIP file not found: #{file_path}")
         {:error, :invalid_path}
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  # Fetch from local directory containing X12 files
+  defp fetch_from_local_directory(dir_path, opts) do
+    Logger.info("Reading local directory: #{dir_path}")
+
+    with {:ok, config} <- get_config(opts),
+         {:ok, _} <- validate_local_directory(dir_path),
+         {:ok, x12_files} <- find_x12_files_in_directory(dir_path, config.allowed_extensions),
+         {:ok, manifest} <- load_manifest(dir_path) do
+      {:ok,
+       %{
+         files: x12_files,
+         manifest: manifest,
+         # No cleanup needed for local directories
+         temp_dir: nil,
+         # Source directory for output
+         source_dir: Path.expand(dir_path)
+       }}
+    else
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Fetch a single local X12 file
+  defp fetch_from_local_x12(file_path, opts) do
+    Logger.info("Reading local X12 file: #{file_path}")
+
+    with {:ok, config} <- get_config(opts),
+         {:ok, _} <- validate_local_file(file_path, config.max_size),
+         true <- File.exists?(file_path) do
+      {:ok,
+       %{
+         files: [Path.expand(file_path)],
+         manifest: nil,
+         # No cleanup needed for local files
+         temp_dir: nil,
+         # Source directory is the parent of the file
+         source_dir: Path.expand(file_path) |> Path.dirname()
+       }}
+    else
+      false ->
+        Logger.error("Local X12 file not found: #{file_path}")
+        {:error, :invalid_path}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Validate that a local directory exists and is accessible
+  defp validate_local_directory(dir_path) do
+    cond do
+      not File.exists?(dir_path) ->
+        Logger.error("Directory not found: #{dir_path}")
+        {:error, :invalid_path}
+
+      not File.dir?(dir_path) ->
+        Logger.error("Path is not a directory: #{dir_path}")
+        {:error, :invalid_path}
+
+      true ->
+        {:ok, :valid}
+    end
+  end
+
+  # Find all X12 files in a directory (non-recursive)
+  defp find_x12_files_in_directory(dir_path, allowed_extensions) do
+    case File.ls(dir_path) do
+      {:ok, files} ->
+        x12_files =
+          files
+          |> Enum.map(fn file -> Path.join(dir_path, file) end)
+          |> Enum.filter(fn path ->
+            File.regular?(path) &&
+              String.downcase(Path.extname(path)) in allowed_extensions
+          end)
+          |> Enum.map(&Path.expand/1)
+          |> Enum.sort()
+
+        if Enum.empty?(x12_files) do
+          Logger.error(
+            "No X12 files found in directory. Expected extensions: #{inspect(allowed_extensions)}"
+          )
+
+          {:error, :no_x12_files}
+        else
+          Logger.info("Found #{length(x12_files)} X12 files in directory")
+          {:ok, x12_files}
+        end
+
+      {:error, reason} ->
+        Logger.error("Failed to list directory: #{inspect(reason)}")
+        {:error, :invalid_path}
     end
   end
 
@@ -228,7 +384,9 @@ defmodule X12Bridge.RemoteFetcher do
                %{
                  files: x12_files,
                  manifest: manifest,
-                 temp_dir: temp_dir
+                 temp_dir: temp_dir,
+                 # No local source directory for Databricks (output not written back locally)
+                 source_dir: nil
                }}
             end
 

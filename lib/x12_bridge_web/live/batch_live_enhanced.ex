@@ -11,6 +11,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   alias X12Bridge.Conversions
   alias X12Bridge.Conversions.Batch
+  alias X12Bridge.OutputWriter
   alias X12Bridge.RemoteFetcher
 
   @impl true
@@ -66,7 +67,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
       # Spawn background task to fetch and process
       Task.start(fn ->
         case RemoteFetcher.fetch_and_extract(source) do
-          {:ok, %{files: file_paths, temp_dir: temp_dir}} ->
+          {:ok, %{files: file_paths, temp_dir: temp_dir, source_dir: source_dir}} ->
             # Create batch in database
             {:ok, batch} =
               Conversions.create_batch(%{
@@ -95,14 +96,22 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             # Process using existing pipeline
             Conversions.process_batch_sync(batch.id, files_to_process)
 
+            # Write JSON output to source directory (if local source)
+            output_result =
+              if source_dir do
+                OutputWriter.write_batch_output(source_dir, batch.id)
+              else
+                {:ok, %{written: 0, skipped: true}}
+              end
+
             # Cleanup temporary files
             RemoteFetcher.cleanup_temp_files(temp_dir)
 
-            # Broadcast completion
+            # Broadcast completion with output info
             Phoenix.PubSub.broadcast(
               X12Bridge.PubSub,
               "batches",
-              {:remote_import_completed, {:ok, batch}}
+              {:remote_import_completed, {:ok, batch}, output_result, source_dir}
             )
 
           {:error, reason} ->
@@ -151,42 +160,52 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
       # Extract all files (including from ZIP files)
       all_files = extract_uploaded_files(socket)
 
-      {:ok, batch} =
-        Conversions.create_batch(%{
-          name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
-          total_files: length(all_files),
-          status: "uploaded"
-        })
+      # Validate that we have at least one valid file to process
+      if length(all_files) == 0 do
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "No valid X12 files found. ZIP archives must contain .x12, .edi, or .txt files."
+         )}
+      else
+        {:ok, batch} =
+          Conversions.create_batch(%{
+            name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
+            total_files: length(all_files),
+            status: "uploaded"
+          })
 
-      Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
+        Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
 
-      # Create jobs and store file contents
-      files_to_process =
-        Enum.map(all_files, fn {filename, content, file_size} ->
-          {:ok, job} =
-            Conversions.create_job(%{
-              batch_id: batch.id,
-              original_filename: filename,
-              file_size: file_size,
-              status: "uploaded",
-              x12_content: content
-            })
+        # Create jobs and store file contents
+        files_to_process =
+          Enum.map(all_files, fn {filename, content, file_size} ->
+            {:ok, job} =
+              Conversions.create_job(%{
+                batch_id: batch.id,
+                original_filename: filename,
+                file_size: file_size,
+                status: "uploaded",
+                x12_content: content
+              })
 
-          {job.id, content}
-        end)
-        |> Map.new()
+            {job.id, content}
+          end)
+          |> Map.new()
 
-      batches = Conversions.list_batches(limit: 10)
+        batches = Conversions.list_batches(limit: 10)
 
-      {:noreply,
-       socket
-       |> assign(:batches, batches)
-       |> assign(:current_batch, Conversions.get_batch!(batch.id))
-       |> assign(:uploaded_files, files_to_process)
-       |> put_flash(
-         :info,
-         "Staged #{batch.total_files} files. Click 'Verify' to check X12 structure."
-       )}
+        {:noreply,
+         socket
+         |> assign(:batches, batches)
+         |> assign(:current_batch, Conversions.get_batch!(batch.id))
+         |> assign(:uploaded_files, files_to_process)
+         |> put_flash(
+           :info,
+           "Staged #{batch.total_files} files. Click 'Verify' to check X12 structure."
+         )}
+      end
     end
   end
 
@@ -366,6 +385,39 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      )}
   end
 
+  @impl true
+  def handle_info({:remote_import_completed, {:ok, batch}, output_result, source_dir}, socket) do
+    batches = Conversions.list_batches(limit: 10)
+
+    # Build message based on output results
+    output_msg =
+      case output_result do
+        {:ok, %{written: written, skipped: true}} when written == 0 ->
+          ""
+
+        {:ok, %{written: written, failed: 0}} ->
+          " Output: #{written} JSON files written to #{source_dir}/output/"
+
+        {:ok, %{written: written, failed: failed}} ->
+          " Output: #{written} written, #{failed} failed to #{source_dir}/output/"
+
+        _ ->
+          ""
+      end
+
+    {:noreply,
+     socket
+     |> assign(:batches, batches)
+     |> assign(:remote_status, :completed)
+     |> assign(:remote_result, batch)
+     |> assign(:current_batch, batch)
+     |> put_flash(
+       :info,
+       "Remote import complete! #{batch.completed_files} successful, #{batch.failed_files} failed.#{output_msg}"
+     )}
+  end
+
+  # Fallback for old message format (without output info)
   @impl true
   def handle_info({:remote_import_completed, {:ok, batch}}, socket) do
     batches = Conversions.list_batches(limit: 10)
@@ -694,7 +746,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                     X12, EDI, TXT, or ZIP files (up to 50 files, 10MB each)
                   </p>
                   <p class="mt-1 text-xs text-gray-400">
-                    ZIP files will be automatically extracted
+                    ZIP files must contain .x12, .edi, or .txt files
                   </p>
                 </label>
 
@@ -1031,14 +1083,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             <form phx-submit="process_remote_batch" class="space-y-4" autocomplete="off">
               <div>
                 <label for="remote-url" class="block text-sm font-medium text-gray-700 mb-2">
-                  ZIP File Source
+                  X12 File Source
                 </label>
                 <input
                   type="text"
                   id="remote-url"
                   name="url"
                   phx-hook="RemoteUrlInput"
-                  placeholder="Enter URL, file path, or Databricks path"
+                  placeholder="e.g., /path/to/x12_files/ or /path/to/batch.zip"
                   class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 bg-white"
                   autocomplete="off"
                   autocorrect="off"
@@ -1047,7 +1099,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   required
                 />
                 <p class="mt-2 text-xs text-gray-500">
-                  Supports: HTTP/HTTPS URLs • Local file paths • Databricks paths (/mnt/...)
+                  Supports: Local directories • Local ZIP files • Single X12 files • HTTP/HTTPS URLs • Databricks paths
                 </p>
               </div>
 
@@ -1142,13 +1194,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             
     <!-- Info Box -->
             <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm">
-              <h4 class="font-semibold text-purple-900 mb-2">ℹ️ How it works:</h4>
+              <h4 class="font-semibold text-purple-900 mb-2">ℹ️ Supported Sources:</h4>
               <ul class="space-y-1 text-purple-800 text-xs">
-                <li>1. Enter a URL pointing to a ZIP archive containing X12 files</li>
-                <li>2. The ZIP is downloaded and extracted to a temporary directory</li>
-                <li>3. All X12 files (.x12, .edi, .txt) are processed concurrently</li>
-                <li>4. Results are stored in the database and can be downloaded</li>
-                <li>5. Temporary files are automatically cleaned up</li>
+                <li><strong>Local Directory:</strong> /path/to/x12_files/ - reads all .x12, .edi, .txt files</li>
+                <li><strong>Local ZIP File:</strong> /path/to/batch.zip - extracts and processes X12 files</li>
+                <li><strong>Single X12 File:</strong> /path/to/claim.x12 - processes one file</li>
+                <li><strong>HTTP/HTTPS URL:</strong> https://example.com/batch.zip - downloads and extracts</li>
+                <li><strong>Databricks:</strong> /mnt/data/x12/batch.zip - requires Databricks config</li>
               </ul>
               <div class="mt-3 pt-3 border-t border-purple-200">
                 <p class="text-purple-900 font-medium">Limits:</p>
@@ -1270,8 +1322,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
               <div class="p-6 border-b flex justify-between items-center">
                 <div>
                   <h2 class="text-2xl font-bold text-gray-900">{@current_batch.name}</h2>
-                  <p class="text-sm text-gray-500">
+                  <p class="text-sm text-gray-500 flex items-center gap-2">
                     {@current_batch.completed_files + @current_batch.failed_files} / {@current_batch.total_files} processed
+                    <span class="ml-2 text-xs text-gray-400">
+                      Last update: {Calendar.strftime(@current_batch.updated_at, "%H:%M:%S")}
+                    </span>
                   </p>
                 </div>
                 <button
@@ -1457,13 +1512,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                             Hide
                           </button>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-2 gap-4" phx-hook="SyncScroll" id={"sync-scroll-#{job.id}"}>
                           <!-- X12 Content (Left) -->
                           <div class="flex flex-col">
                             <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">
                               Original X12 File:
                             </h6>
                             <pre
+                              data-sync-scroll
                               class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1"
                               style="color: black !important;"
                             ><%= job.x12_content || "X12 content not available" %></pre>
@@ -1474,6 +1530,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                               Converted JSON:
                             </h6>
                             <pre
+                              data-sync-scroll
                               class="bg-white p-4 rounded border border-gray-200 overflow-x-auto text-black text-sm font-mono max-h-[600px] overflow-y-auto flex-1"
                               style="color: black !important;"
                             ><%= job.json_result %></pre>
@@ -1522,22 +1579,38 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
       case :zip.unzip(String.to_charlist(zip_path), cwd: String.to_charlist(temp_dir)) do
         {:ok, extracted_files} ->
           # Read all extracted files
-          extracted_files
-          |> Enum.map(&to_string/1)
-          |> Enum.filter(fn file ->
-            # Only process X12/EDI files, skip directories and other files
-            !File.dir?(file) && Regex.match?(~r/\.(x12|edi|txt)$/i, file)
-          end)
-          |> Enum.map(fn file ->
-            {:ok, content} = File.read(file)
-            filename = Path.basename(file)
-            file_size = byte_size(content)
-            {filename, content, file_size}
-          end)
+          x12_files =
+            extracted_files
+            |> Enum.map(&to_string/1)
+            |> Enum.filter(fn file ->
+              # Only process X12/EDI files, skip directories and other files
+              !File.dir?(file) && Regex.match?(~r/\.(x12|edi|txt)$/i, file)
+            end)
+            |> Enum.map(fn file ->
+              {:ok, content} = File.read(file)
+              filename = Path.basename(file)
+              file_size = byte_size(content)
+              {filename, content, file_size}
+            end)
+
+          # Log info about what was found
+          total_files = length(Enum.filter(extracted_files, &(!File.dir?(to_string(&1)))))
+          x12_count = length(x12_files)
+
+          if x12_count == 0 && total_files > 0 do
+            require Logger
+
+            Logger.warning(
+              "ZIP archive contains #{total_files} files but no valid X12 files (.x12, .edi, .txt)"
+            )
+          end
+
+          x12_files
 
         {:error, reason} ->
           # If ZIP extraction fails, return empty list
-          IO.puts("Failed to extract ZIP: #{inspect(reason)}")
+          require Logger
+          Logger.error("Failed to extract ZIP: #{inspect(reason)}")
           []
       end
     after

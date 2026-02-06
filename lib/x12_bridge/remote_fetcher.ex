@@ -25,6 +25,7 @@ defmodule X12Bridge.RemoteFetcher do
 
   Supports:
     * HTTP/HTTPS URLs (e.g., "https://example.com/batch.zip")
+    * SFTP URLs (e.g., "sftp://user@host/path/to/files") - requires SFTP config
     * Local ZIP files (e.g., "/path/to/batch.zip")
     * Local directories (e.g., "/path/to/x12_files/")
     * Local single X12 files (e.g., "/path/to/claim.x12")
@@ -59,6 +60,9 @@ defmodule X12Bridge.RemoteFetcher do
     case detect_source_type(source) do
       :http_url ->
         fetch_from_http(source, opts)
+
+      :sftp_url ->
+        fetch_from_sftp(source, opts)
 
       :local_directory ->
         fetch_from_local_directory(source, opts)
@@ -103,6 +107,10 @@ defmodule X12Bridge.RemoteFetcher do
       # HTTP/HTTPS URL
       String.starts_with?(source, "http://") or String.starts_with?(source, "https://") ->
         :http_url
+
+      # SFTP URL
+      String.starts_with?(source, "sftp://") ->
+        :sftp_url
 
       # Databricks mount path
       String.starts_with?(source, "/mnt/") or String.starts_with?(source, "dbfs:/") ->
@@ -183,6 +191,232 @@ defmodule X12Bridge.RemoteFetcher do
        }}
     else
       {:error, _reason} = error -> error
+    end
+  end
+
+  # Fetch from SFTP server
+  defp fetch_from_sftp(sftp_url, opts) do
+    Logger.info("Fetching from SFTP: #{sftp_url}")
+
+    with {:ok, config} <- get_config(opts),
+         {:ok, sftp_config} <- get_sftp_config(sftp_url, opts),
+         {:ok, temp_dir} <- create_temp_directory(),
+         {:ok, files} <- download_sftp_files(sftp_config, temp_dir, config) do
+      # Check if we downloaded a ZIP or individual files
+      zip_files = Enum.filter(files, &String.ends_with?(String.downcase(&1), ".zip"))
+
+      if length(zip_files) == 1 do
+        # Extract the ZIP
+        zip_path = hd(zip_files)
+
+        with {:ok, zip_data} <- File.read(zip_path),
+             {:ok, extracted_files} <- extract_zip(zip_data, temp_dir),
+             {:ok, x12_files} <- validate_zip_contents(extracted_files, config.allowed_extensions),
+             {:ok, manifest} <- load_manifest(temp_dir) do
+          File.rm(zip_path)
+
+          {:ok,
+           %{
+             files: x12_files,
+             manifest: manifest,
+             temp_dir: temp_dir,
+             source_dir: nil
+           }}
+        end
+      else
+        # Filter for X12 files directly
+        x12_files =
+          files
+          |> Enum.filter(fn f ->
+            String.downcase(Path.extname(f)) in config.allowed_extensions
+          end)
+
+        if Enum.empty?(x12_files) do
+          cleanup_temp_files(temp_dir)
+          {:error, :no_x12_files}
+        else
+          {:ok, manifest} = load_manifest(temp_dir)
+
+          {:ok,
+           %{
+             files: x12_files,
+             manifest: manifest,
+             temp_dir: temp_dir,
+             source_dir: nil
+           }}
+        end
+      end
+    else
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Parse SFTP URL and merge with environment config or passed options
+  # Priority: passed options > URL components > environment config
+  defp get_sftp_config(sftp_url, opts) do
+    uri = URI.parse(sftp_url)
+
+    # Get credentials from environment
+    env_config = Application.get_env(:x12_bridge, :sftp, [])
+    env_host = Keyword.get(env_config, :host)
+    env_user = Keyword.get(env_config, :username)
+    env_password = Keyword.get(env_config, :password)
+    env_port = Keyword.get(env_config, :port, 22)
+
+    # Get credentials from passed options (from UI form)
+    opt_user = Keyword.get(opts, :sftp_username)
+    opt_password = Keyword.get(opts, :sftp_password)
+    opt_port = Keyword.get(opts, :sftp_port)
+
+    # Priority: passed options > URL components > environment config
+    host = uri.host || env_host
+    user = non_empty(opt_user) || uri.userinfo || env_user
+    port = opt_port || uri.port || env_port
+    path = uri.path || "/"
+    password = non_empty(opt_password) || env_password
+
+    cond do
+      is_nil(host) or host == "" ->
+        Logger.error("SFTP host not configured. Use sftp://host/path URL format")
+        {:error, :sftp_not_configured}
+
+      is_nil(user) or user == "" ->
+        Logger.error("SFTP username not configured. Enter username in the form")
+        {:error, :sftp_not_configured}
+
+      is_nil(password) or password == "" ->
+        Logger.error("SFTP password not configured. Enter password in the form")
+        {:error, :sftp_not_configured}
+
+      true ->
+        {:ok,
+         %{
+           host: host,
+           port: port,
+           username: user,
+           password: password,
+           path: path
+         }}
+    end
+  end
+
+  # Helper to treat empty strings as nil
+  defp non_empty(nil), do: nil
+  defp non_empty(""), do: nil
+  defp non_empty(str) when is_binary(str), do: str
+
+  # Download files from SFTP server
+  defp download_sftp_files(sftp_config, temp_dir, config) do
+    host = String.to_charlist(sftp_config.host)
+    port = sftp_config.port
+    user = String.to_charlist(sftp_config.username)
+    password = String.to_charlist(sftp_config.password)
+    remote_path = String.to_charlist(sftp_config.path)
+
+    Logger.info("Connecting to SFTP: #{sftp_config.host}:#{port} as #{sftp_config.username}")
+
+    # Start SSH application
+    :ssh.start()
+
+    # Connect with password authentication
+    connect_opts = [
+      user: user,
+      password: password,
+      silently_accept_hosts: true,
+      user_interaction: false,
+      connect_timeout: config.timeout
+    ]
+
+    case :ssh.connect(host, port, connect_opts) do
+      {:ok, conn} ->
+        Logger.info("SSH connected, starting SFTP channel")
+
+        case :ssh_sftp.start_channel(conn) do
+          {:ok, sftp_channel} ->
+            result = download_from_channel(sftp_channel, remote_path, temp_dir, config)
+            :ssh_sftp.stop_channel(sftp_channel)
+            :ssh.close(conn)
+            result
+
+          {:error, reason} ->
+            :ssh.close(conn)
+            Logger.error("Failed to start SFTP channel: #{inspect(reason)}")
+            {:error, :sftp_channel_failed}
+        end
+
+      {:error, reason} ->
+        Logger.error("SSH connection failed: #{inspect(reason)}")
+        {:error, :sftp_connection_failed}
+    end
+  end
+
+  # Download files from SFTP channel
+  defp download_from_channel(channel, remote_path, temp_dir, config) do
+    case :ssh_sftp.list_dir(channel, remote_path) do
+      {:ok, file_list} ->
+        # It's a directory - download all matching files
+        Logger.info("Remote path is directory, listing files...")
+
+        files =
+          file_list
+          |> Enum.map(&to_string/1)
+          |> Enum.reject(&(&1 in [".", ".."]))
+          |> Enum.filter(fn name ->
+            ext = Path.extname(name) |> String.downcase()
+            ext in config.allowed_extensions or ext == ".zip"
+          end)
+
+        Logger.info("Found #{length(files)} matching files: #{inspect(files)}")
+
+        downloaded =
+          Enum.reduce_while(files, {:ok, []}, fn filename, {:ok, acc} ->
+            remote_file = Path.join(to_string(remote_path), filename) |> String.to_charlist()
+            local_file = Path.join(temp_dir, filename)
+
+            case download_single_file(channel, remote_file, local_file) do
+              :ok ->
+                {:cont, {:ok, [local_file | acc]}}
+
+              {:error, reason} ->
+                Logger.error("Failed to download #{filename}: #{inspect(reason)}")
+                {:cont, {:ok, acc}}
+            end
+          end)
+
+        case downloaded do
+          {:ok, []} -> {:error, :no_x12_files}
+          {:ok, files} -> {:ok, Enum.reverse(files)}
+        end
+
+      {:error, :no_such_file} ->
+        # It's a single file - download it directly
+        filename = Path.basename(to_string(remote_path))
+        local_file = Path.join(temp_dir, filename)
+
+        case download_single_file(channel, remote_path, local_file) do
+          :ok -> {:ok, [local_file]}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        Logger.error("Failed to list remote directory: #{inspect(reason)}")
+        {:error, :sftp_list_failed}
+    end
+  end
+
+  # Download a single file from SFTP
+  defp download_single_file(channel, remote_path, local_path) do
+    Logger.info("Downloading: #{remote_path} -> #{local_path}")
+
+    case :ssh_sftp.read_file(channel, remote_path) do
+      {:ok, data} ->
+        File.write!(local_path, data)
+        Logger.info("Downloaded #{byte_size(data)} bytes")
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

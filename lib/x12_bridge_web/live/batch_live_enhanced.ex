@@ -39,6 +39,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      |> assign(:processing_status, nil)
      # Store uploaded file contents for verification/translation
      |> assign(:uploaded_files, %{})
+     # SFTP credential fields (shown when URL starts with sftp://)
+     |> assign(:show_sftp_fields, false)
+     |> assign(:sftp_username, "")
+     |> assign(:sftp_password, "")
+     |> assign(:sftp_port, "22")
      |> allow_upload(:batch_files,
        accept: [".x12", ".edi", ".txt", ".zip"],
        max_entries: 50,
@@ -57,16 +62,60 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   # === REMOTE IMPORT EVENTS ===
 
   @impl true
+  def handle_event("url_changed", %{"value" => url}, socket) do
+    # Show SFTP credential fields when URL starts with sftp://
+    show_sftp = String.starts_with?(String.downcase(url || ""), "sftp://")
+    {:noreply, assign(socket, :show_sftp_fields, show_sftp)}
+  end
+
+  # Fallback for form change events
+  def handle_event("url_changed", params, socket) do
+    url = params["url"] || params["value"] || ""
+    show_sftp = String.starts_with?(String.downcase(url), "sftp://")
+    {:noreply, assign(socket, :show_sftp_fields, show_sftp)}
+  end
+
+  @impl true
+  def handle_event("update_sftp_field", params, socket) do
+    field = params["field"]
+    value = params["value"] || ""
+    field_atom = String.to_existing_atom("sftp_#{field}")
+    {:noreply, assign(socket, field_atom, value)}
+  end
+
+  @impl true
   def handle_event("process_remote_batch", params, socket) do
-    IO.inspect(params, label: "RECEIVED PARAMS")
+    require Logger
+    Logger.info("PROCESS_REMOTE_BATCH params: #{inspect(Map.keys(params))}")
+
     source = params["url"] || ""
 
     if String.trim(source) == "" do
       {:noreply, put_flash(socket, :error, "Please enter a source path or URL")}
     else
+      # Build SFTP options if this is an SFTP URL
+      # Read credentials from form params directly (more reliable than assigns)
+      sftp_opts =
+        if String.starts_with?(String.downcase(source), "sftp://") do
+          username = params["sftp_username"] || socket.assigns.sftp_username || ""
+          password = params["sftp_password"] || socket.assigns.sftp_password || ""
+          port_str = params["sftp_port"] || socket.assigns.sftp_port || "22"
+          port = if port_str == "", do: 22, else: String.to_integer(port_str)
+
+          Logger.info("SFTP credentials - user: #{username}, pass length: #{String.length(password)}, port: #{port}")
+
+          [
+            sftp_username: username,
+            sftp_password: password,
+            sftp_port: port
+          ]
+        else
+          []
+        end
+
       # Spawn background task to fetch and process
       Task.start(fn ->
-        case RemoteFetcher.fetch_and_extract(source) do
+        case RemoteFetcher.fetch_and_extract(source, sftp_opts) do
           {:ok, %{files: file_paths, temp_dir: temp_dir, source_dir: source_dir}} ->
             # Create batch in database
             {:ok, batch} =
@@ -1090,7 +1139,9 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   id="remote-url"
                   name="url"
                   phx-hook="RemoteUrlInput"
-                  placeholder="e.g., /path/to/x12_files/ or /path/to/batch.zip"
+                  phx-keyup="url_changed"
+                  phx-debounce="300"
+                  placeholder="e.g., sftp://hostname/path/to/files or /local/path/"
                   class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 bg-white"
                   autocomplete="off"
                   autocorrect="off"
@@ -1099,9 +1150,60 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   required
                 />
                 <p class="mt-2 text-xs text-gray-500">
-                  Supports: Local directories • Local ZIP files • Single X12 files • HTTP/HTTPS URLs • Databricks paths
+                  Supports: SFTP servers • Local directories • ZIP files • HTTP/HTTPS URLs • Databricks
                 </p>
               </div>
+
+    <!-- SFTP Credentials (shown when URL starts with sftp://) -->
+              <%= if @show_sftp_fields do %>
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+                  <h4 class="font-medium text-blue-900 text-sm">🔐 SFTP Credentials</h4>
+                  <div class="grid grid-cols-3 gap-3">
+                    <div>
+                      <label class="block text-xs font-medium text-gray-700 mb-1">Username</label>
+                      <input
+                        type="text"
+                        name="sftp_username"
+                        value={@sftp_username}
+                        phx-keyup="update_sftp_field"
+                        phx-value-field="username"
+                        placeholder="username"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white"
+                        autocomplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-gray-700 mb-1">Password</label>
+                      <input
+                        type="password"
+                        name="sftp_password"
+                        value={@sftp_password}
+                        phx-keyup="update_sftp_field"
+                        phx-value-field="password"
+                        placeholder="••••••••"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white"
+                        autocomplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-gray-700 mb-1">Port</label>
+                      <input
+                        type="number"
+                        name="sftp_port"
+                        value={@sftp_port}
+                        phx-keyup="update_sftp_field"
+                        phx-value-field="port"
+                        placeholder="22"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white"
+                        autocomplete="off"
+                      />
+                    </div>
+                  </div>
+                  <p class="text-xs text-blue-700">
+                    Enter your SFTP server credentials. The hostname is taken from the URL above.
+                  </p>
+                </div>
+              <% end %>
 
               <button
                 type="submit"
@@ -1200,6 +1302,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                 <li><strong>Local ZIP File:</strong> /path/to/batch.zip - extracts and processes X12 files</li>
                 <li><strong>Single X12 File:</strong> /path/to/claim.x12 - processes one file</li>
                 <li><strong>HTTP/HTTPS URL:</strong> https://example.com/batch.zip - downloads and extracts</li>
+                <li><strong>SFTP Server:</strong> sftp://user@host/path/to/files - requires SFTP env vars</li>
                 <li><strong>Databricks:</strong> /mnt/data/x12/batch.zip - requires Databricks config</li>
               </ul>
               <div class="mt-3 pt-3 border-t border-purple-200">
@@ -1685,6 +1788,19 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   defp format_remote_error(:invalid_databricks_response),
     do: "Invalid response from Databricks API. Please check the file path."
+
+  defp format_remote_error(:sftp_not_configured),
+    do:
+      "SFTP is not configured. Please set SFTP_HOST, SFTP_USERNAME, and SFTP_PASSWORD environment variables."
+
+  defp format_remote_error(:sftp_connection_failed),
+    do: "Failed to connect to SFTP server. Please check the hostname, port, and credentials."
+
+  defp format_remote_error(:sftp_channel_failed),
+    do: "Failed to start SFTP session. The server may not support SFTP."
+
+  defp format_remote_error(:sftp_list_failed),
+    do: "Failed to list remote directory. Please check the path exists and you have permission."
 
   defp format_remote_error(_), do: "An error occurred while processing the file."
 

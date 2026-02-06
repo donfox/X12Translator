@@ -21,7 +21,7 @@ defmodule X12Bridge.MixProject do
   def application do
     [
       mod: {X12Bridge.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :ssh]
     ]
   end
 

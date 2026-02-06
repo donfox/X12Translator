@@ -20,6 +20,20 @@ if System.get_env("PHX_SERVER") do
   config :x12_bridge, X12BridgeWeb.Endpoint, server: true
 end
 
+# SFTP Configuration (all environments)
+# Set these environment variables to enable SFTP remote import:
+#   SFTP_HOST     - SFTP server hostname or IP
+#   SFTP_USERNAME - SFTP username
+#   SFTP_PASSWORD - SFTP password
+#   SFTP_PORT     - SFTP port (default: 22)
+if System.get_env("SFTP_HOST") do
+  config :x12_bridge, :sftp,
+    host: System.get_env("SFTP_HOST"),
+    username: System.get_env("SFTP_USERNAME"),
+    password: System.get_env("SFTP_PASSWORD"),
+    port: String.to_integer(System.get_env("SFTP_PORT") || "22")
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

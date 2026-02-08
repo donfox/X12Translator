@@ -7,11 +7,13 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   """
   use X12BridgeWeb, :live_view
 
+  require Logger
+
   import X12BridgeWeb.Layouts, only: [app_layout: 1]
 
   alias X12Bridge.Conversions
   alias X12Bridge.Conversions.Batch
-  alias X12Bridge.OutputWriter
+  alias X12Bridge.BatchProcessor
   alias X12Bridge.RemoteFetcher
 
   @impl true
@@ -22,6 +24,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     end
 
     batches = Conversions.list_batches(limit: 10)
+    {input_dir, output_dir} = resolve_hot_folder_dirs()
 
     {:ok,
      socket
@@ -35,10 +38,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      # nil, :processing, :completed, :error
      |> assign(:remote_status, nil)
      |> assign(:remote_result, nil)
+     |> assign(:hot_input_dir, input_dir)
+     |> assign(:hot_output_dir, output_dir)
      # Track active processing
      |> assign(:processing_status, nil)
      # Store uploaded file contents for verification/translation
      |> assign(:uploaded_files, %{})
+     # Remote URL field value (preserved across re-renders)
+     |> assign(:remote_url, "")
      # SFTP credential fields (shown when URL starts with sftp://)
      |> assign(:show_sftp_fields, false)
      |> assign(:sftp_username, "")
@@ -63,16 +70,24 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
 
   @impl true
   def handle_event("url_changed", %{"value" => url}, socket) do
-    # Show SFTP credential fields when URL starts with sftp://
-    show_sftp = String.starts_with?(String.downcase(url || ""), "sftp://")
-    {:noreply, assign(socket, :show_sftp_fields, show_sftp)}
+    url = url || ""
+    show_sftp = String.starts_with?(String.downcase(url), "sftp://")
+
+    {:noreply,
+     socket
+     |> assign(:remote_url, url)
+     |> assign(:show_sftp_fields, show_sftp)}
   end
 
   # Fallback for form change events
   def handle_event("url_changed", params, socket) do
     url = params["url"] || params["value"] || ""
     show_sftp = String.starts_with?(String.downcase(url), "sftp://")
-    {:noreply, assign(socket, :show_sftp_fields, show_sftp)}
+
+    {:noreply,
+     socket
+     |> assign(:remote_url, url)
+     |> assign(:show_sftp_fields, show_sftp)}
   end
 
   @impl true
@@ -102,7 +117,9 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           port_str = params["sftp_port"] || socket.assigns.sftp_port || "22"
           port = if port_str == "", do: 22, else: String.to_integer(port_str)
 
-          Logger.info("SFTP credentials - user: #{username}, pass length: #{String.length(password)}, port: #{port}")
+          Logger.info(
+            "SFTP credentials - user: #{username}, pass length: #{String.length(password)}, port: #{port}"
+          )
 
           [
             sftp_username: username,
@@ -116,52 +133,48 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
       # Spawn background task to fetch and process
       Task.start(fn ->
         case RemoteFetcher.fetch_and_extract(source, sftp_opts) do
-          {:ok, %{files: file_paths, temp_dir: temp_dir, source_dir: source_dir}} ->
-            # Create batch in database
-            {:ok, batch} =
-              Conversions.create_batch(%{
-                name: "Remote Import - #{extract_filename(source)}",
-                total_files: length(file_paths)
-              })
+          {:ok, %{files: file_paths, temp_dir: temp_dir}} ->
+            {input_dir, output_dir} = resolve_hot_folder_dirs()
+            File.mkdir_p!(input_dir)
 
-            Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
+            {copied_files, metadata} =
+              copy_files_to_input(file_paths, source, input_dir)
 
-            # Create jobs and read file contents
-            files_to_process =
-              Enum.map(file_paths, fn path ->
-                {:ok, content} = File.read(path)
+            batch_opts = %{
+              input_dir: input_dir,
+              output_dir: output_dir,
+              batch_name: "Remote Import - #{extract_filename(source)}",
+              file_metadata: metadata
+            }
 
-                {:ok, job} =
-                  Conversions.create_job(%{
-                    batch_id: batch.id,
-                    original_filename: Path.basename(path),
-                    file_size: byte_size(content),
-                    status: "pending"
-                  })
-
-                {job.id, content}
-              end)
-
-            # Process using existing pipeline
-            Conversions.process_batch_sync(batch.id, files_to_process)
-
-            # Write JSON output to source directory (if local source)
-            output_result =
-              if source_dir do
-                OutputWriter.write_batch_output(source_dir, batch.id)
-              else
-                {:ok, %{written: 0, skipped: true}}
+            result =
+              case copied_files do
+                [] -> {:error, :no_x12_files}
+                _ -> BatchProcessor.process_input_directory(batch_opts)
               end
 
-            # Cleanup temporary files
             RemoteFetcher.cleanup_temp_files(temp_dir)
 
-            # Broadcast completion with output info
-            Phoenix.PubSub.broadcast(
-              X12Bridge.PubSub,
-              "batches",
-              {:remote_import_completed, {:ok, batch}, output_result, source_dir}
-            )
+            case result do
+              {:ok, batch_result} ->
+                Phoenix.PubSub.broadcast(
+                  X12Bridge.PubSub,
+                  "batches",
+                  {
+                    :remote_import_completed,
+                    {:ok, batch_result.batch_record},
+                    batch_result.output_summary,
+                    output_dir
+                  }
+                )
+
+              {:error, reason} ->
+                Phoenix.PubSub.broadcast(
+                  X12Bridge.PubSub,
+                  "batches",
+                  {:remote_import_completed, {:error, reason}}
+                )
+            end
 
           {:error, reason} ->
             Phoenix.PubSub.broadcast(
@@ -435,20 +448,17 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   end
 
   @impl true
-  def handle_info({:remote_import_completed, {:ok, batch}, output_result, source_dir}, socket) do
+  def handle_info({:remote_import_completed, {:ok, batch}, output_result, output_dir}, socket) do
     batches = Conversions.list_batches(limit: 10)
 
     # Build message based on output results
     output_msg =
       case output_result do
-        {:ok, %{written: written, skipped: true}} when written == 0 ->
-          ""
+        %{written: written, failed: 0} ->
+          " Output: #{written} JSON files written to #{output_dir}/"
 
-        {:ok, %{written: written, failed: 0}} ->
-          " Output: #{written} JSON files written to #{source_dir}/output/"
-
-        {:ok, %{written: written, failed: failed}} ->
-          " Output: #{written} written, #{failed} failed to #{source_dir}/output/"
+        %{written: written, failed: failed} ->
+          " Output: #{written} written, #{failed} failed to #{output_dir}/"
 
         _ ->
           ""
@@ -1126,8 +1136,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           <div class="mb-8 bg-white shadow rounded-lg p-6">
             <h2 class="text-xl font-semibold text-gray-900 mb-4">Remote Batch Import</h2>
             <p class="text-sm text-gray-600 mb-6">
-              Fetch and process X12 files from multiple sources
+              Fetch X12 files, stage them in the local input folder, then write JSON to the local output folder
             </p>
+            <div class="mb-6 text-xs text-gray-600">
+              <p><span class="font-semibold">Input folder:</span> {@hot_input_dir}</p>
+              <p><span class="font-semibold">Output folder:</span> {@hot_output_dir}</p>
+            </div>
 
             <form phx-submit="process_remote_batch" class="space-y-4" autocomplete="off">
               <div>
@@ -1138,6 +1152,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   type="text"
                   id="remote-url"
                   name="url"
+                  value={@remote_url}
                   phx-hook="RemoteUrlInput"
                   phx-keyup="url_changed"
                   phx-debounce="300"
@@ -1153,7 +1168,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   Supports: SFTP servers • Local directories • ZIP files • HTTP/HTTPS URLs • Databricks
                 </p>
               </div>
-
+              
     <!-- SFTP Credentials (shown when URL starts with sftp://) -->
               <%= if @show_sftp_fields do %>
                 <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
@@ -1244,7 +1259,9 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   </svg>
                   <div>
                     <p class="font-semibold text-blue-900">Downloading and processing...</p>
-                    <p class="text-sm text-blue-700">This may take a moment depending on file size</p>
+                    <p class="text-sm text-blue-700">
+                      Files are staged locally before translation. This may take a moment depending on file size.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1298,12 +1315,26 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm">
               <h4 class="font-semibold text-purple-900 mb-2">ℹ️ Supported Sources:</h4>
               <ul class="space-y-1 text-purple-800 text-xs">
-                <li><strong>Local Directory:</strong> /path/to/x12_files/ - reads all .x12, .edi, .txt files</li>
-                <li><strong>Local ZIP File:</strong> /path/to/batch.zip - extracts and processes X12 files</li>
+                <li>
+                  <strong>Local Directory:</strong>
+                  /path/to/x12_files/ - reads all .x12, .edi, .txt files
+                </li>
+                <li>
+                  <strong>Local ZIP File:</strong>
+                  /path/to/batch.zip - extracts and processes X12 files
+                </li>
                 <li><strong>Single X12 File:</strong> /path/to/claim.x12 - processes one file</li>
-                <li><strong>HTTP/HTTPS URL:</strong> https://example.com/batch.zip - downloads and extracts</li>
-                <li><strong>SFTP Server:</strong> sftp://user@host/path/to/files - requires SFTP env vars</li>
-                <li><strong>Databricks:</strong> /mnt/data/x12/batch.zip - requires Databricks config</li>
+                <li>
+                  <strong>HTTP/HTTPS URL:</strong>
+                  https://example.com/batch.zip - downloads and extracts
+                </li>
+                <li>
+                  <strong>SFTP Server:</strong>
+                  sftp://user@host/path/to/files - enter credentials above
+                </li>
+                <li>
+                  <strong>Databricks:</strong> /mnt/data/x12/batch.zip - requires Databricks config
+                </li>
               </ul>
               <div class="mt-3 pt-3 border-t border-purple-200">
                 <p class="text-purple-900 font-medium">Limits:</p>
@@ -1615,7 +1646,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                             Hide
                           </button>
                         </div>
-                        <div class="grid grid-cols-2 gap-4" phx-hook="SyncScroll" id={"sync-scroll-#{job.id}"}>
+                        <div
+                          class="grid grid-cols-2 gap-4"
+                          phx-hook="SyncScroll"
+                          id={"sync-scroll-#{job.id}"}
+                        >
                           <!-- X12 Content (Left) -->
                           <div class="flex flex-col">
                             <h6 class="text-xs font-semibold text-gray-600 mb-2 bg-gray-200 p-2 rounded">
@@ -1752,6 +1787,82 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     |> URI.parse()
     |> Map.get(:path, "")
     |> Path.basename()
+  end
+
+  defp resolve_hot_folder_dirs do
+    config = Application.get_env(:x12_bridge, :batch_hot_folder, [])
+
+    input_dir = Keyword.get(config, :input_dir, "priv/batch_processing/input")
+    output_dir = Keyword.get(config, :output_dir, "priv/batch_processing/output")
+
+    {input_dir, output_dir}
+  end
+
+  defp copy_files_to_input(files, source, input_dir) do
+    uri = URI.parse(source)
+    remote_host = uri.host
+    remote_base = uri.path || "/"
+
+    Enum.reduce(files, {[], %{}}, fn temp_path, {acc_files, acc_metadata} ->
+      filename = Path.basename(temp_path)
+      dest_path = unique_dest_path(input_dir, filename)
+
+      case File.cp(temp_path, dest_path) do
+        :ok ->
+          remote_path = build_remote_path(remote_base, filename, length(files))
+
+          metadata =
+            acc_metadata
+            |> Map.put(dest_path, %{
+              remote_host: remote_host,
+              remote_path: remote_path,
+              remote_source_url: source
+            })
+
+          {[dest_path | acc_files], metadata}
+
+        {:error, reason} ->
+          Logger.error("Failed to copy #{temp_path}: #{inspect(reason)}")
+          {acc_files, acc_metadata}
+      end
+    end)
+    |> then(fn {files_copied, metadata} -> {Enum.reverse(files_copied), metadata} end)
+  end
+
+  defp build_remote_path(base_path, filename, file_count) do
+    cond do
+      file_count <= 1 ->
+        base_path
+
+      String.ends_with?(base_path, "/") ->
+        Path.join(base_path, filename)
+
+      true ->
+        Path.join(base_path, filename)
+    end
+  end
+
+  defp unique_dest_path(input_dir, filename) do
+    base = Path.rootname(filename)
+    ext = Path.extname(filename)
+
+    candidate = Path.join(input_dir, filename)
+
+    if File.exists?(candidate) do
+      find_unique_path(input_dir, base, ext, 1)
+    else
+      candidate
+    end
+  end
+
+  defp find_unique_path(input_dir, base, ext, index) do
+    candidate = Path.join(input_dir, "#{base}_#{index}#{ext}")
+
+    if File.exists?(candidate) do
+      find_unique_path(input_dir, base, ext, index + 1)
+    else
+      candidate
+    end
   end
 
   defp format_remote_error(:invalid_url),

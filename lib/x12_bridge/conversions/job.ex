@@ -17,6 +17,14 @@ defmodule X12Bridge.Conversions.Job do
   ### File Information
   - `original_filename` - Name of the uploaded X12 file
   - `file_size` - Size in bytes
+  - `input_path` - Full path where the X12 file was read from
+  - `output_path` - Full path where the JSON file was written
+  - `remote_host` - Remote server hostname (if imported)
+  - `remote_path` - Remote file path (if imported)
+  - `remote_source_url` - Remote source URL used for import
+  - `delivery_status` - Delivery lifecycle status (received/ready/picked_up/deleted)
+  - `picked_up_at` - Timestamp when JSON was picked up
+  - `deleted_at` - Timestamp when input file was deleted
 
   ### Processing Status
   - `status` - Current job status (see JobStatus module)
@@ -56,6 +64,14 @@ defmodule X12Bridge.Conversions.Job do
     # File metadata
     field :original_filename, :string
     field :file_size, :integer
+    field :input_path, :string
+    field :output_path, :string
+    field :remote_host, :string
+    field :remote_path, :string
+    field :remote_source_url, :string
+    field :delivery_status, :string
+    field :picked_up_at, :utc_datetime
+    field :deleted_at, :utc_datetime
 
     # Processing status & progress
     field :status, :string, default: "uploaded"
@@ -94,6 +110,14 @@ defmodule X12Bridge.Conversions.Job do
       :batch_id,
       :original_filename,
       :file_size,
+      :input_path,
+      :output_path,
+      :remote_host,
+      :remote_path,
+      :remote_source_url,
+      :delivery_status,
+      :picked_up_at,
+      :deleted_at,
       :status,
       :json_result,
       :x12_content,

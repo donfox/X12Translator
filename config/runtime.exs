@@ -81,6 +81,24 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  batch_input_dir = System.get_env("BATCH_INPUT_DIR") || "/home/donf/batch_input"
+  batch_output_dir = System.get_env("BATCH_OUTPUT_DIR") || "/home/donf/batch_output"
+
+  config :x12_bridge, :batch_hot_folder,
+    input_dir: batch_input_dir,
+    output_dir: batch_output_dir,
+    allowed_extensions: [".x12", ".edi", ".txt"]
+
+  log_dir = System.get_env("BATCH_LOG_DIR") || "/home/donf/batch_logs"
+  log_file = System.get_env("BATCH_LOG_FILE") || Path.join(log_dir, "batch_processor.log")
+
+  File.mkdir_p!(log_dir)
+
+  config :logger, :handlers, [
+    {:default, :logger_std_h, %{level: :info}},
+    {:batch_file, :logger_std_h, %{level: :info, config: %{file: String.to_charlist(log_file)}}}
+  ]
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

@@ -88,3 +88,12 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+# SFTP settings for development (remote source: /home/donf/batch_input)
+config :x12_bridge, :sftp,
+  host: "107.181.241.82",
+  username: "donf",
+  password: "d0089Fx@!@",
+  port: 22
+
+config :x12_bridge, :sftp_import, default_source: "sftp://107.181.241.82/home/donf/batch_input"

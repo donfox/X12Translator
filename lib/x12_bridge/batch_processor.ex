@@ -25,6 +25,7 @@ defmodule X12Bridge.BatchProcessor do
   require Logger
 
   alias X12Bridge.Conversions
+  alias X12Bridge.OutputWriter
 
   @default_config %{
     max_concurrency: 10,
@@ -40,6 +41,9 @@ defmodule X12Bridge.BatchProcessor do
       :successful_files,
       :failed_files,
       :processing_time_ms,
+      :input_directory,
+      :output_directory,
+      :output_summary,
       jobs: []
     ]
   end
@@ -73,18 +77,89 @@ defmodule X12Bridge.BatchProcessor do
     end
   end
 
+  @doc """
+  Process X12 files from an input directory and write JSON outputs to a
+  separate output directory.
+
+  This is intended for manual batch runs against a hot folder on disk.
+
+  ## Options
+    * `:input_dir` - Directory containing X12 files (defaults to config)
+    * `:output_dir` - Directory for JSON output (defaults to config)
+    * `:batch_name` - Optional batch name override
+    * `:allowed_extensions` - List of file extensions (defaults to config)
+  """
+  def process_input_directory(opts \\ []) do
+    config = get_config(opts)
+    hot_config = get_hot_folder_config(opts)
+    file_metadata = Map.get(opts |> Map.new(), :file_metadata, %{})
+
+    input_dir = hot_config.input_dir
+    output_dir = hot_config.output_dir
+    allowed_extensions = hot_config.allowed_extensions
+    batch_name = hot_config.batch_name || build_batch_name("hot_folder")
+
+    Logger.info("Scanning input directory #{input_dir} for X12 files")
+
+    with {:ok, files} <- scan_directory_for_extensions(input_dir, allowed_extensions),
+         {:ok, %BatchResult{} = result} <-
+           process_files_to_database(files, batch_name, config, file_metadata),
+         {:ok, output_summary} <-
+           OutputWriter.write_batch_output_to_dir(output_dir, result.batch_id) do
+      update_delivery_tracking(output_summary)
+
+      Logger.info("Batch #{result.batch_id} output written to #{output_dir}")
+
+      {:ok,
+       %BatchResult{
+         result
+         | input_directory: input_dir,
+           output_directory: output_dir,
+           output_summary: output_summary
+       }}
+    else
+      {:error, :no_files} ->
+        {:error, "No input files found in #{input_dir}"}
+
+      {:error, reason} = error ->
+        Logger.error("Input directory processing failed: #{inspect(reason)}")
+        error
+    end
+  end
+
   # Private functions
 
   defp get_config(opts) do
-    app_config = Application.get_env(:x12_bridge, :batch_processor, %{})
+    app_config = normalize_config(Application.get_env(:x12_bridge, :batch_processor, %{}))
 
     @default_config
     |> Map.merge(app_config)
-    |> Map.merge(Map.new(opts))
+    |> Map.merge(normalize_config(opts))
   end
 
+  defp get_hot_folder_config(opts) do
+    app_config = normalize_config(Application.get_env(:x12_bridge, :batch_hot_folder, %{}))
+
+    %{
+      input_dir: "priv/batch_processing/input",
+      output_dir: "priv/batch_processing/output",
+      allowed_extensions: [".x12", ".edi", ".txt"],
+      batch_name: nil
+    }
+    |> Map.merge(app_config)
+    |> Map.merge(
+      opts
+      |> normalize_config()
+      |> Map.take([:input_dir, :output_dir, :allowed_extensions, :batch_name])
+    )
+  end
+
+  defp normalize_config(config) when is_map(config), do: config
+  defp normalize_config(config) when is_list(config), do: Map.new(config)
+  defp normalize_config(_config), do: %{}
+
   # Process files and store in database (no file output)
-  defp process_files_to_database(file_paths, batch_name, config) do
+  defp process_files_to_database(file_paths, batch_name, config, file_metadata \\ %{}) do
     start_time = System.monotonic_time(:millisecond)
     total_files = length(file_paths)
 
@@ -113,13 +188,18 @@ defmodule X12Bridge.BatchProcessor do
             file_size = byte_size(content)
 
             # Create job in database
-            {:ok, job} =
-              Conversions.create_job(%{
+            job_attrs =
+              %{
                 batch_id: batch.id,
                 original_filename: filename,
                 file_size: file_size,
-                status: "pending"
-              })
+                status: "pending",
+                input_path: file_path,
+                delivery_status: "received"
+              }
+              |> Map.merge(Map.get(file_metadata, file_path, %{}))
+
+            {:ok, job} = Conversions.create_job(job_attrs)
 
             {job.id, content}
 
@@ -127,14 +207,19 @@ defmodule X12Bridge.BatchProcessor do
             Logger.error("Failed to read #{filename}: #{inspect(reason)}")
 
             # Create failed job
-            {:ok, job} =
-              Conversions.create_job(%{
+            job_attrs =
+              %{
                 batch_id: batch.id,
                 original_filename: filename,
                 file_size: 0,
                 status: "failed",
-                error_message: "Failed to read file: #{inspect(reason)}"
-              })
+                error_message: "Failed to read file: #{inspect(reason)}",
+                input_path: file_path,
+                delivery_status: "failed"
+              }
+              |> Map.merge(Map.get(file_metadata, file_path, %{}))
+
+            {:ok, job} = Conversions.create_job(job_attrs)
 
             {job.id, nil}
         end
@@ -181,4 +266,62 @@ defmodule X12Bridge.BatchProcessor do
       {:ok, files}
     end
   end
+
+  defp scan_directory_for_extensions(directory, allowed_extensions) do
+    unless File.exists?(directory) do
+      File.mkdir_p!(directory)
+    end
+
+    extensions =
+      allowed_extensions
+      |> Enum.map(&String.downcase/1)
+      |> Enum.map(fn ext -> if String.starts_with?(ext, "."), do: ext, else: ".#{ext}" end)
+
+    files =
+      case File.ls(directory) do
+        {:ok, entries} ->
+          entries
+          |> Enum.map(&Path.join(directory, &1))
+          |> Enum.filter(&File.regular?/1)
+          |> Enum.filter(fn path ->
+            String.downcase(Path.extname(path)) in extensions
+          end)
+
+        {:error, reason} ->
+          Logger.error("Failed to list directory #{directory}: #{inspect(reason)}")
+          []
+      end
+
+    if Enum.empty?(files) do
+      {:error, :no_files}
+    else
+      {:ok, files}
+    end
+  end
+
+  defp build_batch_name(prefix) do
+    timestamp =
+      DateTime.utc_now()
+      |> DateTime.to_iso8601()
+      |> String.replace(["-", ":"], "")
+      |> String.replace("T", "_")
+      |> String.replace("Z", "")
+
+    "#{prefix}_#{timestamp}"
+  end
+
+  defp update_delivery_tracking(%{by_job: by_job}) when is_map(by_job) do
+    Enum.each(by_job, fn {job_id, paths} ->
+      output_path = List.first(paths)
+
+      job = Conversions.get_job!(job_id)
+
+      Conversions.update_job(job, %{
+        output_path: output_path,
+        delivery_status: "ready"
+      })
+    end)
+  end
+
+  defp update_delivery_tracking(_), do: :ok
 end

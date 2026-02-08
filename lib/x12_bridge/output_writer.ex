@@ -61,6 +61,35 @@ defmodule X12Bridge.OutputWriter do
   end
 
   @doc """
+  Writes a single JSON file to an explicit output directory.
+
+  ## Parameters
+    * `output_dir` - The directory where JSON should be written
+    * `original_filename` - The original X12 filename (e.g., "claim.x12")
+    * `json_content` - The JSON string to write
+  """
+  def write_json_to_dir(output_dir, original_filename, json_content)
+      when is_binary(output_dir) do
+    json_filename = to_json_filename(original_filename)
+    output_path = Path.join(output_dir, json_filename)
+
+    with :ok <- ensure_output_dir(output_dir),
+         :ok <- File.write(output_path, json_content) do
+      Logger.info("Wrote JSON output: #{output_path}")
+      {:ok, output_path}
+    else
+      {:error, reason} ->
+        Logger.error("Failed to write JSON to #{output_path}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  def write_json_to_dir(nil, _original_filename, _json_content) do
+    Logger.debug("No output_dir provided, skipping JSON file output")
+    {:ok, :skipped}
+  end
+
+  @doc """
   Writes all translated jobs from a batch to the output subdirectory.
 
   ## Parameters
@@ -104,6 +133,55 @@ defmodule X12Bridge.OutputWriter do
 
   def write_batch_output(nil, batch_id) do
     Logger.debug("No source_dir provided for batch #{batch_id}, skipping file output")
+    {:ok, %{written: 0, failed: 0, paths: [], skipped: true}}
+  end
+
+  @doc """
+  Writes all translated jobs from a batch to a specified output directory.
+
+  ## Parameters
+    * `output_dir` - The directory to write JSON files into
+    * `batch_id` - The batch ID to write output for
+  """
+  def write_batch_output_to_dir(output_dir, batch_id) when is_binary(output_dir) do
+    batch = Conversions.get_batch!(batch_id)
+
+    translated_jobs =
+      batch.jobs
+      |> Enum.filter(fn job ->
+        job.status in ["translated", "completed"] && job.json_result
+      end)
+
+    if Enum.empty?(translated_jobs) do
+      Logger.info("No translated jobs to write for batch #{batch_id}")
+      {:ok, %{written: 0, failed: 0, paths: []}}
+    else
+      results =
+        Enum.flat_map(translated_jobs, fn job ->
+          write_job_output_to_dir(output_dir, job)
+        end)
+
+      written = Enum.filter(results, &match?({:ok, _}, &1))
+      failed = Enum.filter(results, &match?({:error, _}, &1))
+
+      paths = Enum.map(written, fn {:ok, %{path: path}} -> path end)
+
+      by_job =
+        Enum.reduce(written, %{}, fn {:ok, %{job_id: job_id, path: path}}, acc ->
+          Map.update(acc, job_id, [path], fn existing -> [path | existing] end)
+        end)
+        |> Map.new(fn {job_id, job_paths} -> {job_id, Enum.reverse(job_paths)} end)
+
+      Logger.info(
+        "Batch #{batch_id} output: #{length(written)} written, #{length(failed)} failed"
+      )
+
+      {:ok, %{written: length(written), failed: length(failed), paths: paths, by_job: by_job}}
+    end
+  end
+
+  def write_batch_output_to_dir(nil, batch_id) do
+    Logger.debug("No output_dir provided for batch #{batch_id}, skipping file output")
     {:ok, %{written: 0, failed: 0, paths: [], skipped: true}}
   end
 
@@ -192,6 +270,7 @@ defmodule X12Bridge.OutputWriter do
         # Multi-claim: write one file per claim
         Enum.map(claims, fn %{claim_id: claim_id, json: json} ->
           filename = to_split_claim_filename(job.original_filename, claim_id)
+
           case write_json(source_dir, filename, json) do
             {:ok, path} -> {:ok, path}
             {:error, reason} -> {:error, {filename, reason}}
@@ -201,10 +280,49 @@ defmodule X12Bridge.OutputWriter do
       {:error, _reason} ->
         # Splitting failed - fall back to writing the full json_result
         Logger.warning("Claim splitting failed for #{job.original_filename}, writing full JSON")
+
         [
           case write_json(source_dir, job.original_filename, job.json_result) do
             {:ok, path} -> {:ok, path}
             {:error, reason} -> {:error, {job.original_filename, reason}}
+          end
+        ]
+    end
+  end
+
+  defp write_job_output_to_dir(output_dir, job) do
+    case maybe_split_claims(job) do
+      {:ok, nil} ->
+        [
+          case write_json_to_dir(output_dir, job.original_filename, job.json_result) do
+            {:ok, path} ->
+              {:ok, %{job_id: job.id, path: path}}
+
+            {:error, reason} ->
+              {:error, %{job_id: job.id, filename: job.original_filename, reason: reason}}
+          end
+        ]
+
+      {:ok, claims} ->
+        Enum.map(claims, fn %{claim_id: claim_id, json: json} ->
+          filename = to_split_claim_filename(job.original_filename, claim_id)
+
+          case write_json_to_dir(output_dir, filename, json) do
+            {:ok, path} -> {:ok, %{job_id: job.id, path: path}}
+            {:error, reason} -> {:error, %{job_id: job.id, filename: filename, reason: reason}}
+          end
+        end)
+
+      {:error, _reason} ->
+        Logger.warning("Claim splitting failed for #{job.original_filename}, writing full JSON")
+
+        [
+          case write_json_to_dir(output_dir, job.original_filename, job.json_result) do
+            {:ok, path} ->
+              {:ok, %{job_id: job.id, path: path}}
+
+            {:error, reason} ->
+              {:error, %{job_id: job.id, filename: job.original_filename, reason: reason}}
           end
         ]
     end

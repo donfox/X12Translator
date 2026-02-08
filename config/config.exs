@@ -61,6 +61,12 @@ config :mime, :types, %{
 # Configure batch retention policy
 config :x12_bridge, :batch_max_concurrency, System.schedulers_online()
 
+# Configure hot folder processing
+config :x12_bridge, :batch_hot_folder,
+  input_dir: "priv/batch_processing/input",
+  output_dir: "priv/batch_processing/output",
+  allowed_extensions: [".x12", ".edi", ".txt"]
+
 config :x12_bridge, :batch_retention,
   # Keep only the 50 most recent batches in development
   max_batches: 50

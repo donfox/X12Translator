@@ -89,11 +89,10 @@ config :phoenix_live_view,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
 
-# SFTP settings for development (remote source: /home/donf/batch_input)
-config :x12_bridge, :sftp,
-  host: "107.181.241.82",
-  username: "donf",
-  password: "d0089Fx@!@",
-  port: 22
-
-config :x12_bridge, :sftp_import, default_source: "sftp://107.181.241.82/home/donf/batch_input"
+# SFTP settings for development
+# Set SFTP_HOST, SFTP_USERNAME, SFTP_PASSWORD, SFTP_PORT env vars
+# (or configure in runtime.exs which already reads these)
+if System.get_env("SFTP_HOST") do
+  config :x12_bridge, :sftp_import,
+    default_source: "sftp://#{System.get_env("SFTP_HOST")}#{System.get_env("SFTP_REMOTE_PATH", "/home/donf/batch_input")}"
+end

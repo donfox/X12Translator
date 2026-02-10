@@ -133,7 +133,7 @@ defmodule X12Bridge.BatchProcessorTest do
   describe "in-memory processing" do
     test "does not create output files" do
       # Ensure no output directory exists before test
-      output_dir = "priv/batch_processing/output"
+      output_dir = "priv/uploads/output"
       if File.exists?(output_dir) do
         File.rm_rf!(output_dir)
       end
@@ -163,7 +163,7 @@ defmodule X12Bridge.BatchProcessorTest do
     end
 
     test "does not create failed file directory" do
-      failed_dir = "priv/batch_processing/failed"
+      failed_dir = "priv/uploads/failed"
       if File.exists?(failed_dir) do
         File.rm_rf!(failed_dir)
       end

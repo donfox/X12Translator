@@ -47,6 +47,7 @@ defmodule X12Bridge.Conversions.Batch do
   schema "conversion_batches" do
     # Batch information
     field :name, :string
+    field :submitted_by, :string
     field :total_files, :integer
 
     # Overall processing status
@@ -76,6 +77,7 @@ defmodule X12Bridge.Conversions.Batch do
     batch
     |> cast(attrs, [
       :name,
+      :submitted_by,
       :total_files,
       :completed_files,
       :failed_files,

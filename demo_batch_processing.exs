@@ -28,9 +28,9 @@ Application.ensure_all_started(:x12_bridge)
 alias X12Bridge.BatchProcessor
 
 IO.puts "📁 Directory Structure:\n"
-IO.puts "   Input:   priv/batch_processing/input/"
-IO.puts "   Output:  priv/batch_processing/output/"
-IO.puts "   Failed:  priv/batch_processing/failed/"
+IO.puts "   Input:   priv/uploads/input/"
+IO.puts "   Output:  priv/uploads/output/"
+IO.puts "   Failed:  priv/uploads/failed/"
 IO.puts ""
 
 # Demo 1: Automated test data batch (5 files)
@@ -149,7 +149,7 @@ Key Takeaways
 
 🎯 Next Steps:
    1. Run tests: mix test test/x12_bridge/batch_processor_test.exs
-   2. Try processing your own files in priv/batch_processing/input/
+   2. Try processing your own files in priv/uploads/input/
    3. Generate custom test data: mix generate_batch custom --size 100 --name my_batch
 
 """

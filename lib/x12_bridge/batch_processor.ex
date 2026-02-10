@@ -92,7 +92,9 @@ defmodule X12Bridge.BatchProcessor do
   def process_input_directory(opts \\ []) do
     config = get_config(opts)
     hot_config = get_hot_folder_config(opts)
-    file_metadata = Map.get(opts |> Map.new(), :file_metadata, %{})
+    opts_map = opts |> Map.new()
+    file_metadata = Map.get(opts_map, :file_metadata, %{})
+    submitted_by = Map.get(opts_map, :submitted_by)
 
     input_dir = hot_config.input_dir
     output_dir = hot_config.output_dir
@@ -103,7 +105,7 @@ defmodule X12Bridge.BatchProcessor do
 
     with {:ok, files} <- scan_directory_for_extensions(input_dir, allowed_extensions),
          {:ok, %BatchResult{} = result} <-
-           process_files_to_database(files, batch_name, config, file_metadata),
+           process_files_to_database(files, batch_name, config, file_metadata, submitted_by),
          {:ok, output_summary} <-
            OutputWriter.write_batch_output_to_dir(output_dir, result.batch_id) do
       update_delivery_tracking(output_summary)
@@ -141,8 +143,8 @@ defmodule X12Bridge.BatchProcessor do
     app_config = normalize_config(Application.get_env(:x12_bridge, :batch_hot_folder, %{}))
 
     %{
-      input_dir: "priv/batch_processing/input",
-      output_dir: "priv/batch_processing/output",
+      input_dir: "priv/uploads/input",
+      output_dir: "priv/uploads/output",
       allowed_extensions: [".x12", ".edi", ".txt"],
       batch_name: nil
     }
@@ -158,20 +160,27 @@ defmodule X12Bridge.BatchProcessor do
   defp normalize_config(config) when is_list(config), do: Map.new(config)
   defp normalize_config(_config), do: %{}
 
+  defp maybe_put_submitted_by(attrs, nil), do: attrs
+  defp maybe_put_submitted_by(attrs, ""), do: attrs
+  defp maybe_put_submitted_by(attrs, name), do: Map.put(attrs, :submitted_by, name)
+
   # Process files and store in database (no file output)
-  defp process_files_to_database(file_paths, batch_name, config, file_metadata \\ %{}) do
+  defp process_files_to_database(file_paths, batch_name, config, file_metadata \\ %{}, submitted_by \\ nil) do
     start_time = System.monotonic_time(:millisecond)
     total_files = length(file_paths)
 
     # Create batch in database
-    {:ok, batch} =
-      Conversions.create_batch(%{
+    batch_attrs =
+      %{
         name: batch_name,
         total_files: total_files,
         completed_files: 0,
         failed_files: 0,
         status: "processing"
-      })
+      }
+      |> maybe_put_submitted_by(submitted_by)
+
+    {:ok, batch} = Conversions.create_batch(batch_attrs)
 
     Logger.info(
       "Processing batch #{batch.id} with #{total_files} files (max concurrency: #{config.max_concurrency})"

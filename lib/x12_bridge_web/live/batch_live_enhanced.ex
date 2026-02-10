@@ -15,6 +15,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   alias X12Bridge.Conversions.Batch
   alias X12Bridge.BatchProcessor
   alias X12Bridge.RemoteFetcher
+  alias X12Bridge.UploadDirs
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,7 +25,6 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     end
 
     batches = Conversions.list_batches(limit: 10)
-    {input_dir, output_dir} = resolve_hot_folder_dirs()
 
     {:ok,
      socket
@@ -38,12 +38,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
      # nil, :processing, :completed, :error
      |> assign(:remote_status, nil)
      |> assign(:remote_result, nil)
-     |> assign(:hot_input_dir, input_dir)
-     |> assign(:hot_output_dir, output_dir)
      # Track active processing
      |> assign(:processing_status, nil)
      # Store uploaded file contents for verification/translation
      |> assign(:uploaded_files, %{})
+     # User name for batch association
+     |> assign(:submitted_by, "")
      # Remote URL field value (preserved across re-renders)
      |> assign(:remote_url, "")
      # SFTP credential fields (shown when URL starts with sftp://)
@@ -64,6 +64,11 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   def handle_event("switch_mode", %{"mode" => mode}, socket) do
     mode_atom = String.to_existing_atom(mode)
     {:noreply, assign(socket, :processing_mode, mode_atom)}
+  end
+
+  @impl true
+  def handle_event("update_submitted_by", %{"value" => value}, socket) do
+    {:noreply, assign(socket, :submitted_by, value || "")}
   end
 
   # === REMOTE IMPORT EVENTS ===
@@ -130,12 +135,14 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           []
         end
 
+      # Capture submitted_by before spawning task
+      submitted_by = socket.assigns.submitted_by
+
       # Spawn background task to fetch and process
       Task.start(fn ->
         case RemoteFetcher.fetch_and_extract(source, sftp_opts) do
           {:ok, %{files: file_paths, temp_dir: temp_dir}} ->
-            {input_dir, output_dir} = resolve_hot_folder_dirs()
-            File.mkdir_p!(input_dir)
+            {input_dir, output_dir} = UploadDirs.ensure(submitted_by)
 
             {copied_files, metadata} =
               copy_files_to_input(file_paths, source, input_dir)
@@ -144,7 +151,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
               input_dir: input_dir,
               output_dir: output_dir,
               batch_name: "Remote Import - #{extract_filename(source)}",
-              file_metadata: metadata
+              file_metadata: metadata,
+              submitted_by: String.trim(submitted_by)
             }
 
             result =
@@ -215,6 +223,7 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
   @impl true
   def handle_event("process_batch", _params, socket) do
     entries = socket.assigns.uploads.batch_files.entries
+    submitted_by = socket.assigns.submitted_by
 
     if length(entries) == 0 do
       {:noreply, put_flash(socket, :error, "Please select files to upload")}
@@ -231,25 +240,34 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
            "No valid X12 files found. ZIP archives must contain .x12, .edi, or .txt files."
          )}
       else
+        # Create per-user input/output directories
+        {input_dir, _output_dir} = UploadDirs.ensure(submitted_by)
+
         {:ok, batch} =
           Conversions.create_batch(%{
             name: "Batch Upload - #{DateTime.utc_now() |> Calendar.strftime("%Y-%m-%d %H:%M")}",
+            submitted_by: String.trim(submitted_by),
             total_files: length(all_files),
             status: "uploaded"
           })
 
         Phoenix.PubSub.subscribe(X12Bridge.PubSub, "batch:#{batch.id}")
 
-        # Create jobs and store file contents
+        # Create jobs, store file contents, and write to per-user input directory
         files_to_process =
           Enum.map(all_files, fn {filename, content, file_size} ->
+            # Write X12 file to per-user input directory
+            input_path = Path.join(input_dir, filename)
+            File.write!(input_path, content)
+
             {:ok, job} =
               Conversions.create_job(%{
                 batch_id: batch.id,
                 original_filename: filename,
                 file_size: file_size,
                 status: "uploaded",
-                x12_content: content
+                x12_content: content,
+                input_path: input_path
               })
 
             {job.id, content}
@@ -603,6 +621,21 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     batch = Conversions.get_batch!(batch_id)
     batches = Conversions.list_batches(limit: 10)
 
+    # Write JSON output to per-user output directory
+    if batch.submitted_by && String.trim(batch.submitted_by) != "" do
+      {_input_dir, output_dir} = UploadDirs.ensure(batch.submitted_by)
+
+      {:ok, result} = X12Bridge.OutputWriter.write_batch_output_to_dir(output_dir, batch_id)
+
+      if Map.has_key?(result, :by_job) do
+        Enum.each(result.by_job, fn {job_id, paths} ->
+          output_path = List.first(paths)
+          job = Conversions.get_job!(job_id)
+          Conversions.update_job(job, %{output_path: output_path, delivery_status: "ready"})
+        end)
+      end
+    end
+
     # $0.10 per claim
     cost = claims_charged * 0.10
 
@@ -658,7 +691,26 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             </div>
           </div>
         </div>
-        
+
+    <!-- YOUR NAME (shared across both modes) -->
+        <div class="mb-4 mt-4 bg-white shadow rounded-lg p-4">
+          <label for="submitted_by" class="block text-sm font-medium text-gray-700 mb-1">
+            Your Name
+          </label>
+          <input
+            type="text"
+            id="submitted_by"
+            name="submitted_by"
+            value={@submitted_by}
+            placeholder="Enter your name (e.g., John Doe)"
+            phx-blur="update_submitted_by"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white placeholder-gray-400"
+          />
+          <p class="mt-1 text-xs text-gray-500">
+            Used to organize your files into personal folders
+          </p>
+        </div>
+
     <!-- PROCESSING STATUS INDICATOR -->
         <%= if @processing_status == :active && @current_batch do %>
           <div class="mb-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
@@ -876,7 +928,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
             <div class="mb-8 bg-white shadow rounded-lg p-6 border-2 border-blue-200">
               <div class="mb-4">
                 <h2 class="text-xl font-semibold text-gray-900">Processing: {@current_batch.name}</h2>
-                <p class="text-sm text-gray-500">{@current_batch.total_files} files staged</p>
+                <p class="text-sm text-gray-500">
+                  {@current_batch.total_files} files staged
+                  <%= if @current_batch.submitted_by && @current_batch.submitted_by != "" do %>
+                    <span class="text-gray-400 ml-2">by {@current_batch.submitted_by}</span>
+                  <% end %>
+                </p>
               </div>
               
     <!-- TWO BUTTONS SIDE-BY-SIDE -->
@@ -1068,7 +1125,12 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
                     <div class="flex justify-between items-start">
                       <div class="flex-1">
-                        <h3 class="font-medium text-gray-900">{batch.name}</h3>
+                        <h3 class="font-medium text-gray-900">
+                          {batch.name}
+                          <%= if batch.submitted_by && batch.submitted_by != "" do %>
+                            <span class="text-xs text-gray-400 font-normal ml-2">by {batch.submitted_by}</span>
+                          <% end %>
+                        </h3>
                         <p class="text-sm text-gray-500">
                           {Calendar.strftime(batch.inserted_at, "%Y-%m-%d %H:%M")}
                         </p>
@@ -1136,12 +1198,8 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
           <div class="mb-8 bg-white shadow rounded-lg p-6">
             <h2 class="text-xl font-semibold text-gray-900 mb-4">Remote Batch Import</h2>
             <p class="text-sm text-gray-600 mb-6">
-              Fetch X12 files, stage them in the local input folder, then write JSON to the local output folder
+              Fetch X12 files from a remote source and process them into your personal folder
             </p>
-            <div class="mb-6 text-xs text-gray-600">
-              <p><span class="font-semibold">Input folder:</span> {@hot_input_dir}</p>
-              <p><span class="font-semibold">Output folder:</span> {@hot_output_dir}</p>
-            </div>
 
             <form phx-submit="process_remote_batch" class="space-y-4" autocomplete="off">
               <div>
@@ -1458,6 +1516,9 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
                   <h2 class="text-2xl font-bold text-gray-900">{@current_batch.name}</h2>
                   <p class="text-sm text-gray-500 flex items-center gap-2">
                     {@current_batch.completed_files + @current_batch.failed_files} / {@current_batch.total_files} processed
+                    <%= if @current_batch.submitted_by && @current_batch.submitted_by != "" do %>
+                      <span class="text-gray-400">by {@current_batch.submitted_by}</span>
+                    <% end %>
                     <span class="ml-2 text-xs text-gray-400">
                       Last update: {Calendar.strftime(@current_batch.updated_at, "%H:%M:%S")}
                     </span>
@@ -1787,15 +1848,6 @@ defmodule X12BridgeWeb.BatchLiveEnhanced do
     |> URI.parse()
     |> Map.get(:path, "")
     |> Path.basename()
-  end
-
-  defp resolve_hot_folder_dirs do
-    config = Application.get_env(:x12_bridge, :batch_hot_folder, [])
-
-    input_dir = Keyword.get(config, :input_dir, "priv/batch_processing/input")
-    output_dir = Keyword.get(config, :output_dir, "priv/batch_processing/output")
-
-    {input_dir, output_dir}
   end
 
   defp copy_files_to_input(files, source, input_dir) do

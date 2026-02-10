@@ -8,6 +8,14 @@ set -e  # Exit on error
 echo "🚀 Starting X12Bridge Application..."
 echo ""
 
+# Load environment variables if .env exists
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+    echo "🔑 Loaded environment from .env"
+fi
+
 # Check if we're in the right directory
 if [ ! -f "mix.exs" ]; then
     echo "❌ Error: mix.exs not found. Please run this script from the X12Bridge project root."

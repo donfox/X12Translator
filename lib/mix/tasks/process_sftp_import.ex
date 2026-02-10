@@ -89,8 +89,8 @@ defmodule Mix.Tasks.ProcessSftpImport do
   defp resolve_hot_folder_dirs(opts) do
     config = Application.get_env(:x12_bridge, :batch_hot_folder, [])
 
-    input_dir = opts[:input] || Keyword.get(config, :input_dir, "priv/batch_processing/input")
-    output_dir = opts[:output] || Keyword.get(config, :output_dir, "priv/batch_processing/output")
+    input_dir = opts[:input] || Keyword.get(config, :input_dir, "priv/uploads/input")
+    output_dir = opts[:output] || Keyword.get(config, :output_dir, "priv/uploads/output")
 
     {input_dir, output_dir}
   end

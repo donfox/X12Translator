@@ -5,12 +5,12 @@ import Config
 # If you have postgres/postgres setup, no configuration needed!
 # For custom credentials, set these environment variables:
 #   PGUSER, PGPASSWORD, PGHOST, PGPORT, PGDATABASE
-config :x12_bridge, X12Bridge.Repo,
+config :x12_translator, X12Translator.Repo,
   username: System.get_env("PGUSER") || "postgres",
   password: System.get_env("PGPASSWORD") || "postgres",
   hostname: System.get_env("PGHOST") || "localhost",
   port: String.to_integer(System.get_env("PGPORT") || "5432"),
-  database: System.get_env("PGDATABASE") || "x12_bridge_dev",
+  database: System.get_env("PGDATABASE") || "x12_translator_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -21,7 +21,7 @@ config :x12_bridge, X12Bridge.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :x12_bridge, X12BridgeWeb.Endpoint,
+config :x12_translator, X12TranslatorWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
@@ -30,8 +30,8 @@ config :x12_bridge, X12BridgeWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "GLB83evl5romN+1YFA+aiGn0dpiLlwARDIQH5z7D7K2kfYtwrDu7X4DYcrWRg37g",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:x12_bridge, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:x12_bridge, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:x12_translator, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:x12_translator, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -58,18 +58,18 @@ config :x12_bridge, X12BridgeWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
-config :x12_bridge, X12BridgeWeb.Endpoint,
+config :x12_translator, X12TranslatorWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
       ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",
-      ~r"lib/x12_bridge_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
+      ~r"lib/x12_translator_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
     ]
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :x12_bridge, dev_routes: true
+config :x12_translator, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
@@ -93,6 +93,6 @@ config :phoenix_live_view,
 # Set SFTP_HOST, SFTP_USERNAME, SFTP_PASSWORD, SFTP_PORT env vars
 # (or configure in runtime.exs which already reads these)
 if System.get_env("SFTP_HOST") do
-  config :x12_bridge, :sftp_import,
+  config :x12_translator, :sftp_import,
     default_source: "sftp://#{System.get_env("SFTP_HOST")}#{System.get_env("SFTP_REMOTE_PATH", "/home/donf/batch_input")}"
 end

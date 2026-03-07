@@ -1,9 +1,9 @@
-defmodule X12Bridge.MixProject do
+defmodule X12Translator.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :x12_bridge,
+      app: :x12_translator,
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -20,7 +20,7 @@ defmodule X12Bridge.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {X12Bridge.Application, []},
+      mod: {X12Translator.Application, []},
       extra_applications: [:logger, :runtime_tools, :ssh]
     ]
   end
@@ -79,10 +79,10 @@ defmodule X12Bridge.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind x12_bridge", "esbuild x12_bridge"],
+      "assets.build": ["compile", "tailwind x12_translator", "esbuild x12_translator"],
       "assets.deploy": [
-        "tailwind x12_bridge --minify",
-        "esbuild x12_bridge --minify",
+        "tailwind x12_translator --minify",
+        "esbuild x12_translator --minify",
         "phx.digest"
       ],
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]

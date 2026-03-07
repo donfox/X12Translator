@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddSubmittedByToBatches do
+defmodule X12Translator.Repo.Migrations.AddSubmittedByToBatches do
   use Ecto.Migration
 
   def change do

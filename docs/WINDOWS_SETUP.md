@@ -1,6 +1,6 @@
 # Windows Setup Guide
 
-Complete guide for setting up X12Bridge on Windows (native) and WSL (Windows Subsystem for Linux).
+Complete guide for setting up X12Translator on Windows (native) and WSL (Windows Subsystem for Linux).
 
 ---
 
@@ -80,8 +80,8 @@ cd ~
 mkdir -p projects && cd projects
 
 # Clone the repository
-git clone https://github.com/donfox/X12Bridge.git
-cd X12Bridge
+git clone https://github.com/donfox/X12Translator.git
+cd X12Translator
 
 # Install dependencies and setup
 mix deps.get
@@ -214,12 +214,12 @@ $env:PGPASSWORD = "your_password_here"
 Edit the file to match your PostgreSQL installation:
 
 ```elixir
-config :x12_bridge, X12Bridge.Repo,
+config :x12_translator, X12Translator.Repo,
   username: "postgres",
   password: "your_password_here",
   hostname: "localhost",
   port: 5432,
-  database: "x12_bridge_dev"
+  database: "x12_translator_dev"
 ```
 
 ### Clone and Setup Project
@@ -229,8 +229,8 @@ config :x12_bridge, X12Bridge.Repo,
 cd C:\Users\YourName\projects
 
 # Clone the repository
-git clone https://github.com/donfox/X12Bridge.git
-cd X12Bridge
+git clone https://github.com/donfox/X12Translator.git
+cd X12Translator
 
 # Install dependencies
 mix deps.get
@@ -386,7 +386,7 @@ Permission denied @ dir_s_mkdir - _build
 Run PowerShell as Administrator or check folder permissions:
 ```powershell
 # Grant full control to current user
-icacls "C:\path\to\X12Bridge" /grant ${env:USERNAME}:F /T
+icacls "C:\path\to\X12Translator" /grant ${env:USERNAME}:F /T
 ```
 
 ### 5. Long Path Issues
@@ -421,7 +421,7 @@ Files have `^M` characters or scripts fail to run.
 
 Configure Git to handle line endings:
 ```powershell
-# In X12Bridge directory
+# In X12Translator directory
 git config core.autocrlf true
 
 # Reset files
@@ -500,7 +500,7 @@ start http://localhost:4000/converter
 mix test
 
 # Specific file
-mix test test\x12_bridge\x12\parser_test.exs
+mix test test\x12_translator\x12\parser_test.exs
 
 # With coverage
 mix test --cover
@@ -563,7 +563,7 @@ Windows may be slightly slower than Linux/macOS for Elixir development due to:
 1. **Exclude project folder from Windows Defender:**
    - Settings → Update & Security → Windows Security → Virus & threat protection
    - Manage settings → Exclusions → Add folder
-   - Add: `C:\Users\YourName\projects\X12Bridge`
+   - Add: `C:\Users\YourName\projects\X12Translator`
 
 2. **Use SSD** for project files (not HDD)
 

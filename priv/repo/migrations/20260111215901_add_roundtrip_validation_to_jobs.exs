@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddRoundtripValidationToJobs do
+defmodule X12Translator.Repo.Migrations.AddRoundtripValidationToJobs do
   use Ecto.Migration
 
   def change do

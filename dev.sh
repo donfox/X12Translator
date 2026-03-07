@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# X12Bridge - Development Script
+# X12Translator - Development Script
 # Usage: ./dev.sh [command]
 # Commands:
 #   start    - Start the Phoenix server (default)
@@ -13,12 +13,12 @@ set -e
 
 COMMAND=${1:-start}
 
-echo "🔧 X12Bridge Development Tool"
+echo "🔧 X12Translator Development Tool"
 echo ""
 
 # Check if we're in the right directory
 if [ ! -f "mix.exs" ]; then
-    echo "❌ Error: mix.exs not found. Please run this script from the X12Bridge project root."
+    echo "❌ Error: mix.exs not found. Please run this script from the X12Translator project root."
     exit 1
 fi
 

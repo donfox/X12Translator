@@ -1,4 +1,4 @@
-# X12Bridge Setup Error - Rebar3 Permission Issue
+# X12Translator Setup Error - Rebar3 Permission Issue
 
 ## Error Description
 
@@ -6,7 +6,7 @@ When running `mix setup`, the following error occurs:
 
 ```
 Error reading file /Users/papabear/.config/rebar3/rebar.config: permission denied
-** (Mix) Could not compile dependency :telemetry, "/Users/papabear/.mix/elixir/1-19-otp-28/rebar3 bare compile --paths /Users/papabear/X12Bridge/_build/dev/lib/*/ebin" command failed.
+** (Mix) Could not compile dependency :telemetry, "/Users/papabear/.mix/elixir/1-19-otp-28/rebar3 bare compile --paths /Users/papabear/X12Translator/_build/dev/lib/*/ebin" command failed.
 ```
 
 ## Root Cause
@@ -130,5 +130,5 @@ If you continue to experience issues after trying these solutions, please provid
 ---
 
 **Document Created:** January 20, 2026  
-**Application:** X12Bridge  
+**Application:** X12Translator  
 **Issue Type:** Environment Setup

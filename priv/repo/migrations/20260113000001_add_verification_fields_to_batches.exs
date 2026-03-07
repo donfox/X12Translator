@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddVerificationFieldsToBatches do
+defmodule X12Translator.Repo.Migrations.AddVerificationFieldsToBatches do
   use Ecto.Migration
 
   def change do

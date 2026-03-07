@@ -1,2 +1,2 @@
 ExUnit.start()
-Ecto.Adapters.SQL.Sandbox.mode(X12Bridge.Repo, :manual)
+Ecto.Adapters.SQL.Sandbox.mode(X12Translator.Repo, :manual)

@@ -1,4 +1,4 @@
-defmodule X12Bridge.DataCase do
+defmodule X12Translator.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -10,7 +10,7 @@ defmodule X12Bridge.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use X12Bridge.DataCase, async: true`, although
+  by setting `use X12Translator.DataCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -18,17 +18,17 @@ defmodule X12Bridge.DataCase do
 
   using do
     quote do
-      alias X12Bridge.Repo
+      alias X12Translator.Repo
 
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import X12Bridge.DataCase
+      import X12Translator.DataCase
     end
   end
 
   setup tags do
-    X12Bridge.DataCase.setup_sandbox(tags)
+    X12Translator.DataCase.setup_sandbox(tags)
     :ok
   end
 
@@ -36,7 +36,7 @@ defmodule X12Bridge.DataCase do
   Sets up the sandbox based on the test tags.
   """
   def setup_sandbox(tags) do
-    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(X12Bridge.Repo, shared: not tags[:async])
+    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(X12Translator.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
   end
 

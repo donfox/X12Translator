@@ -12,12 +12,12 @@ import Config
 # If you use `mix release`, you need to explicitly enable the server
 # by passing the PHX_SERVER=true when you start it:
 #
-#     PHX_SERVER=true bin/x12_bridge start
+#     PHX_SERVER=true bin/x12_translator start
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
 if System.get_env("PHX_SERVER") do
-  config :x12_bridge, X12BridgeWeb.Endpoint, server: true
+  config :x12_translator, X12TranslatorWeb.Endpoint, server: true
 end
 
 # SFTP Configuration (all environments)
@@ -27,7 +27,7 @@ end
 #   SFTP_PASSWORD - SFTP password
 #   SFTP_PORT     - SFTP port (default: 22)
 if System.get_env("SFTP_HOST") do
-  config :x12_bridge, :sftp,
+  config :x12_translator, :sftp,
     host: System.get_env("SFTP_HOST"),
     username: System.get_env("SFTP_USERNAME"),
     password: System.get_env("SFTP_PASSWORD"),
@@ -44,7 +44,7 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  config :x12_bridge, X12Bridge.Repo,
+  config :x12_translator, X12Translator.Repo,
     # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
@@ -67,9 +67,9 @@ if config_env() == :prod do
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
-  config :x12_bridge, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :x12_translator, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
-  config :x12_bridge, X12BridgeWeb.Endpoint,
+  config :x12_translator, X12TranslatorWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
       # Enable IPv6 and bind on all interfaces.
@@ -84,7 +84,7 @@ if config_env() == :prod do
   batch_input_dir = System.get_env("BATCH_INPUT_DIR") || "/home/donf/batch_input"
   batch_output_dir = System.get_env("BATCH_OUTPUT_DIR") || "/home/donf/batch_output"
 
-  config :x12_bridge, :batch_hot_folder,
+  config :x12_translator, :batch_hot_folder,
     input_dir: batch_input_dir,
     output_dir: batch_output_dir,
     allowed_extensions: [".x12", ".edi", ".txt"]
@@ -104,7 +104,7 @@ if config_env() == :prod do
   # To get SSL working, you will need to add the `https` key
   # to your endpoint configuration:
   #
-  #     config :x12_bridge, X12BridgeWeb.Endpoint,
+  #     config :x12_translator, X12TranslatorWeb.Endpoint,
   #       https: [
   #         ...,
   #         port: 443,
@@ -126,7 +126,7 @@ if config_env() == :prod do
   # We also recommend setting `force_ssl` in your config/prod.exs,
   # ensuring no data is ever sent via http, always redirecting to https:
   #
-  #     config :x12_bridge, X12BridgeWeb.Endpoint,
+  #     config :x12_translator, X12TranslatorWeb.Endpoint,
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.

@@ -57,7 +57,7 @@ defmodule Mix.Tasks.Setup.CheckEnv do
     IO.puts("  hostname: localhost")
     IO.puts("  port:     5432")
     IO.puts("  username: postgres")
-    IO.puts("  database: x12_bridge_dev")
+    IO.puts("  database: x12_translator_dev")
     IO.puts("")
 
     show_effective_config(env_vars)
@@ -102,7 +102,7 @@ defmodule Mix.Tasks.Setup.CheckEnv do
     effective_host = Map.get(env_map, "PGHOST", "localhost")
     effective_port = Map.get(env_map, "PGPORT", "5432")
     effective_user = Map.get(env_map, "PGUSER", "postgres")
-    effective_db = Map.get(env_map, "PGDATABASE", "x12_bridge_dev")
+    effective_db = Map.get(env_map, "PGDATABASE", "x12_translator_dev")
 
     IO.puts("Effective configuration that will be used:")
     IO.puts("  Host:     #{effective_host}")

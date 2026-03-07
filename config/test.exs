@@ -5,17 +5,17 @@ import Config
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
-config :x12_bridge, X12Bridge.Repo,
+config :x12_translator, X12Translator.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "x12_bridge_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "x12_translator_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
-config :x12_bridge, X12BridgeWeb.Endpoint,
+config :x12_translator, X12TranslatorWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "qdD1GiHNIobkw8BOwiEivMpOorRDBb2wU3p7HWrzH79yhqrjrLpPTNzzZAH0D32l",
   server: false

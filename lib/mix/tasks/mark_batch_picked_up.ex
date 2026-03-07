@@ -10,7 +10,7 @@ defmodule Mix.Tasks.MarkBatchPickedUp do
 
   use Mix.Task
 
-  alias X12Bridge.Conversions
+  alias X12Translator.Conversions
 
   @impl Mix.Task
   def run(args) do

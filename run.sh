@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# X12Bridge - Run Script
+# X12Translator - Run Script
 # This script starts the Phoenix application
 
 set -e  # Exit on error
 
-echo "🚀 Starting X12Bridge Application..."
+echo "🚀 Starting X12Translator Application..."
 echo ""
 
 # Load environment variables if .env exists
@@ -18,7 +18,7 @@ fi
 
 # Check if we're in the right directory
 if [ ! -f "mix.exs" ]; then
-    echo "❌ Error: mix.exs not found. Please run this script from the X12Bridge project root."
+    echo "❌ Error: mix.exs not found. Please run this script from the X12Translator project root."
     exit 1
 fi
 

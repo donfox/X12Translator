@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddVerificationFieldsToJobs do
+defmodule X12Translator.Repo.Migrations.AddVerificationFieldsToJobs do
   use Ecto.Migration
 
   def change do

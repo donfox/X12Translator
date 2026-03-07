@@ -1,11 +1,11 @@
 #!/usr/bin/env elixir
 
-# Demo script for X12Bridge Batch Processing
+# Demo script for X12Translator Batch Processing
 # This demonstrates the hot folder pattern with concurrent processing
 
 IO.puts """
 ========================================
-X12Bridge Batch Processing Demo
+X12Translator Batch Processing Demo
 ========================================
 
 This demo shows:
@@ -17,15 +17,15 @@ This demo shows:
 
 # Ensure we're in the right directory
 if !File.exists?("mix.exs") do
-  IO.puts "Error: Please run this script from the X12Bridge project root"
+  IO.puts "Error: Please run this script from the X12Translator project root"
   System.halt(1)
 end
 
 # Start the application
 Mix.install([], system_env: [{"MIX_ENV", "dev"}])
-Application.ensure_all_started(:x12_bridge)
+Application.ensure_all_started(:x12_translator)
 
-alias X12Bridge.BatchProcessor
+alias X12Translator.BatchProcessor
 
 IO.puts "📁 Directory Structure:\n"
 IO.puts "   Input:   priv/uploads/input/"
@@ -148,7 +148,7 @@ Key Takeaways
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🎯 Next Steps:
-   1. Run tests: mix test test/x12_bridge/batch_processor_test.exs
+   1. Run tests: mix test test/x12_translator/batch_processor_test.exs
    2. Try processing your own files in priv/uploads/input/
    3. Generate custom test data: mix generate_batch custom --size 100 --name my_batch
 

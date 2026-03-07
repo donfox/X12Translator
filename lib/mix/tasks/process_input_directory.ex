@@ -10,7 +10,7 @@ defmodule Mix.Tasks.ProcessInputDirectory do
 
   use Mix.Task
 
-  alias X12Bridge.BatchProcessor
+  alias X12Translator.BatchProcessor
 
   @impl Mix.Task
   def run(args) do

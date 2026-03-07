@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddRemoteMetadataToJobs do
+defmodule X12Translator.Repo.Migrations.AddRemoteMetadataToJobs do
   use Ecto.Migration
 
   def change do

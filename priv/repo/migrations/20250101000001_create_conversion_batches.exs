@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.CreateConversionBatches do
+defmodule X12Translator.Repo.Migrations.CreateConversionBatches do
   use Ecto.Migration
 
   def change do

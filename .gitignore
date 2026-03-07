@@ -26,7 +26,7 @@ erl_crash.dump
 test/fixtures/batch_input/output/
 
 # Ignore package tarball (built via "mix hex.build").
-x12_bridge-*.tar
+x12_translator-*.tar
 
 # Ignore assets that are produced by build tools.
 /priv/static/assets/

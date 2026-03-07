@@ -1,4 +1,4 @@
-# X12Bridge
+# X12Translator
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
@@ -39,7 +39,7 @@ That's it! Load a sample file and convert to JSON.
 
 ---
 
-## What X12Bridge Does
+## What X12Translator Does
 
 ✅ **Parse** X12 837 files (Professional, Institutional, Dental)
 ✅ **Validate** structure, syntax, and business rules
@@ -84,7 +84,7 @@ All documentation is in the [`docs/`](docs/) directory:
 
 ### Quick Links
 
-- **New to X12Bridge?** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Start here!
+- **New to X12Translator?** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Start here!
 - **Understanding two-stage pipeline?** → [ARCHITECTURE.md](docs/ARCHITECTURE.md#stage-1-verification-free)
 - **Database schema?** → [API.md](docs/API.md#database-schema)
 - **Error codes?** → [API.md](docs/API.md#error-codes--messages)
@@ -96,13 +96,13 @@ All documentation is in the [`docs/`](docs/) directory:
 ## Project Structure
 
 ```
-x12_bridge/
+x12_translator/
 ├── lib/
-│   ├── x12_bridge/
+│   ├── x12_translator/
 │   │   ├── x12/              # Core X12 parsing, conversion, validation
 │   │   ├── conversions/      # Batch and job management
 │   │   └── batch_processor.ex # Hot folder processing
-│   └── x12_bridge_web/       # LiveView UI
+│   └── x12_translator_web/       # LiveView UI
 ├── docs/                     # All documentation
 ├── priv/
 │   ├── batch_processing/     # Hot folder directories
@@ -137,19 +137,19 @@ x12_bridge/
 
 ```elixir
 # Parse X12 file
-{:ok, result} = X12Bridge.X12.Parser.parse(x12_content)
+{:ok, result} = X12Translator.X12.Parser.parse(x12_content)
 
 # Validate
-validation = X12Bridge.X12.Validator.validate_content(x12_content)
+validation = X12Translator.X12.Validator.validate_content(x12_content)
 
 # Convert to JSON
-{:ok, json} = X12Bridge.X12.Converter.convert_content(x12_content)
+{:ok, json} = X12Translator.X12.Converter.convert_content(x12_content)
 
 # Batch process local files
-{:ok, result} = X12Bridge.BatchProcessor.process_input_directory()
+{:ok, result} = X12Translator.BatchProcessor.process_input_directory()
 
 # Import from remote SFTP server
-{:ok, result} = X12Bridge.RemoteImport.import_from_sftp(config)
+{:ok, result} = X12Translator.RemoteImport.import_from_sftp(config)
 ```
 
 ---
@@ -239,7 +239,7 @@ iex -S mix phx.server
 
 # Try functions interactively
 iex> content = File.read!("test/fixtures/automated_test_data/001_837p_valid.x12")
-iex> {:ok, json} = X12Bridge.X12.Converter.convert_content(content)
+iex> {:ok, json} = X12Translator.X12.Converter.convert_content(content)
 ```
 
 ---

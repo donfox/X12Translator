@@ -1,4 +1,4 @@
-# X12Bridge API & Configuration Reference
+# X12Translator API & Configuration Reference
 
 Complete reference for database schema, error codes, configuration, remote import, and module functions.
 
@@ -152,7 +152,7 @@ CREATE INDEX idx_jobs_batch_status ON conversion_jobs(batch_id, status);
 
 ```bash
 # Database
-DATABASE_URL=ecto://user:password@localhost:5432/x12_bridge_dev
+DATABASE_URL=ecto://user:password@localhost:5432/x12_translator_dev
 
 # Phoenix
 PHX_HOST=localhost
@@ -176,26 +176,26 @@ BATCH_TIMEOUT_MS=30000
 import Config
 
 # Application settings
-config :x12_bridge,
-  ecto_repos: [X12Bridge.Repo],
+config :x12_translator,
+  ecto_repos: [X12Translator.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # Batch retention (auto-cleanup old batches)
-config :x12_bridge, :batch_retention,
+config :x12_translator, :batch_retention,
   max_batches: 50  # Keep only 50 most recent
 
 # Converter limits
-config :x12_bridge, :converter,
+config :x12_translator, :converter,
   max_file_size_mb: 50,
   processing_timeout_ms: 30_000
 
 # Batch processor concurrency
-config :x12_bridge, :batch_processor,
+config :x12_translator, :batch_processor,
   max_concurrency: 10,
   timeout_per_file_ms: 30_000
 
 # Remote fetcher timeouts
-config :x12_bridge, :remote_fetcher,
+config :x12_translator, :remote_fetcher,
   timeout_ms: 60_000,
   max_file_size_bytes: 100 * 1024 * 1024
 
@@ -216,24 +216,24 @@ config :mime, :types, %{
 import Config
 
 # Database
-config :x12_bridge, X12Bridge.Repo,
+config :x12_translator, X12Translator.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "x12_bridge_dev",
+  database: "x12_translator_dev",
   stacktrace: true,
   show_sensitive_data_on_error: true,
   pool_size: 10
 
 # Endpoint
-config :x12_bridge, X12BridgeWeb.Endpoint,
+config :x12_translator, X12TranslatorWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:x12_bridge, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:x12_bridge, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:x12_translator, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:x12_translator, ~w(--watch)]}
   ]
 
 # Logger
@@ -249,12 +249,12 @@ config :phoenix_live_view, :debug_heex_annotations, true
 import Config
 
 # Database (use DATABASE_URL environment variable)
-config :x12_bridge, X12Bridge.Repo,
+config :x12_translator, X12Translator.Repo,
   pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
   ssl: true
 
 # Endpoint
-config :x12_bridge, X12BridgeWeb.Endpoint,
+config :x12_translator, X12TranslatorWeb.Endpoint,
   url: [host: System.get_env("PHX_HOST"), port: 443, scheme: "https"],
   http: [port: String.to_integer(System.get_env("PORT") || "8080")],
   secret_key_base: System.fetch_env!("SECRET_KEY_BASE"),
@@ -278,14 +278,14 @@ config :logger,
 #### 1. HTTP/HTTPS URLs
 
 ```elixir
-X12Bridge.RemoteFetcher.fetch_and_extract("https://example.com/batches/claims.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("https://example.com/batches/claims.zip")
 # or
-X12Bridge.RemoteFetcher.fetch_and_extract("http://localhost:8000/test.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("http://localhost:8000/test.zip")
 ```
 
 **Options:**
 ```elixir
-X12Bridge.RemoteFetcher.fetch_and_extract(url, 
+X12Translator.RemoteFetcher.fetch_and_extract(url, 
   timeout: 120_000,           # 2 minutes (default: from config)
   max_size: 200 * 1024 * 1024 # 200 MB (default: from config)
 )
@@ -295,11 +295,11 @@ X12Bridge.RemoteFetcher.fetch_and_extract(url,
 
 ```elixir
 # Absolute paths
-X12Bridge.RemoteFetcher.fetch_and_extract("/Users/name/Downloads/batch.zip")
-X12Bridge.RemoteFetcher.fetch_and_extract("C:\\Users\\name\\Downloads\\batch.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("/Users/name/Downloads/batch.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("C:\\Users\\name\\Downloads\\batch.zip")
 
 # Relative paths from project root
-X12Bridge.RemoteFetcher.fetch_and_extract("test/fixtures/sample.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("test/fixtures/sample.zip")
 ```
 
 #### 3. Databricks Paths
@@ -316,8 +316,8 @@ DATABRICKS_TOKEN=dapi1234567890abcdef
 
 **Usage:**
 ```elixir
-X12Bridge.RemoteFetcher.fetch_and_extract("/mnt/data/x12/batch.zip")
-X12Bridge.RemoteFetcher.fetch_and_extract("dbfs:/FileStore/x12_batches/export.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("/mnt/data/x12/batch.zip")
+X12Translator.RemoteFetcher.fetch_and_extract("dbfs:/FileStore/x12_batches/export.zip")
 ```
 
 ### Response Format
@@ -532,7 +532,7 @@ test/fixtures/
 mix test
 
 # Specific test file
-mix test test/x12_bridge/x12/parser_test.exs
+mix test test/x12_translator/x12/parser_test.exs
 
 # Tests with coverage
 mix test --cover
@@ -549,7 +549,7 @@ mix test.watch
 
 ```elixir
 # In dev.exs / prod.exs
-config :x12_bridge, X12Bridge.Repo,
+config :x12_translator, X12Translator.Repo,
   pool_size: 10  # Default: 10 connections
 ```
 
@@ -559,7 +559,7 @@ config :x12_bridge, X12Bridge.Repo,
 
 ```elixir
 # In config.exs
-config :x12_bridge, :batch_processor,
+config :x12_translator, :batch_processor,
   max_concurrency: 10  # Default: 10 files at once
 ```
 
@@ -569,10 +569,10 @@ config :x12_bridge, :batch_processor,
 
 ```elixir
 # In config.exs
-config :x12_bridge, :converter,
+config :x12_translator, :converter,
   processing_timeout_ms: 30_000  # Default: 30 seconds
 
-config :x12_bridge, :batch_processor,
+config :x12_translator, :batch_processor,
   timeout_per_file_ms: 30_000    # Default: 30 seconds
 ```
 
@@ -582,10 +582,10 @@ config :x12_bridge, :batch_processor,
 
 ```elixir
 # In config.exs
-config :x12_bridge, :converter,
+config :x12_translator, :converter,
   max_file_size_mb: 50  # Default: 50 MB
 
-config :x12_bridge, :remote_fetcher,
+config :x12_translator, :remote_fetcher,
   max_file_size_bytes: 100 * 1024 * 1024  # Default: 100 MB
 ```
 

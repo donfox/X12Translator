@@ -1,4 +1,4 @@
-# X12Bridge Architecture
+# X12Translator Architecture
 
 A focused, single-purpose Elixir application for converting X12 EDI healthcare claims to semantic JSON.
 
@@ -15,7 +15,7 @@ A focused, single-purpose Elixir application for converting X12 EDI healthcare c
 
 ## System Overview
 
-X12Bridge uses a **two-stage verification + translation pipeline** to provide cost transparency and quality gates:
+X12Translator uses a **two-stage verification + translation pipeline** to provide cost transparency and quality gates:
 
 ```
 Stage 1: Verify (FREE)     Stage 2: Translate (BILLED)
@@ -25,7 +25,7 @@ Stage 1: Verify (FREE)     Stage 2: Translate (BILLED)
 └─ No cost
 ```
 
-### What X12Bridge Does
+### What X12Translator Does
 
 ✓ Parse X12 EDI files (837P/I/D)
 ✓ Validate X12 structure (fast pre-flight checks)
@@ -33,7 +33,7 @@ Stage 1: Verify (FREE)     Stage 2: Translate (BILLED)
 ✓ Track batch processing jobs with two-stage workflow
 ✓ Provide real-time web interface with cost transparency
 
-### What X12Bridge Does NOT Do
+### What X12Translator Does NOT Do
 
 ✗ Provider validation or lookup
 ✗ Fraud detection
@@ -283,21 +283,21 @@ Legend:
 # config/config.exs
 
 # Batch retention (auto-cleanup old batches)
-config :x12_bridge, :batch_retention,
+config :x12_translator, :batch_retention,
   max_batches: 50
 
 # Converter timeouts & limits
-config :x12_bridge, :converter,
+config :x12_translator, :converter,
   max_file_size_mb: 50,
   processing_timeout_ms: 30_000
 
 # Batch processor
-config :x12_bridge, :batch_processor,
+config :x12_translator, :batch_processor,
   max_concurrency: 10,
   timeout_per_file_ms: 30_000
 
 # Remote fetcher
-config :x12_bridge, :remote_fetcher,
+config :x12_translator, :remote_fetcher,
   timeout_ms: 60_000,
   max_file_size_bytes: 100 * 1024 * 1024
 ```

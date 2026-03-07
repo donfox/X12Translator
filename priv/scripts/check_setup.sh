@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Setup validation script for X12Bridge
+# Setup validation script for X12Translator
 # Checks for common configuration issues before running mix setup
 
 set -e
 
-echo "🔍 X12Bridge Setup Validator"
+echo "🔍 X12Translator Setup Validator"
 echo "============================"
 echo ""
 
@@ -25,13 +25,13 @@ echo ""
 PGHOST_VAR="${PGHOST:-localhost}"
 PGPORT_VAR="${PGPORT:-5432}"
 PGUSER_VAR="${PGUSER:-postgres}"
-PGDATABASE_VAR="${PGDATABASE:-x12_bridge_dev}"
+PGDATABASE_VAR="${PGDATABASE:-x12_translator_dev}"
 
 # Default config from config/dev.exs
 CONFIG_HOST="localhost"
 CONFIG_PORT="5432"
 CONFIG_USER="postgres"
-CONFIG_DB="x12_bridge_dev"
+CONFIG_DB="x12_translator_dev"
 
 # Determine what will actually be used (env vars override config)
 EFFECTIVE_HOST="${PGHOST:-$CONFIG_HOST}"

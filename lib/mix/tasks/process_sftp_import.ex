@@ -13,7 +13,7 @@ defmodule Mix.Tasks.ProcessSftpImport do
 
   use Mix.Task
 
-  alias X12Bridge.{BatchProcessor, RemoteFetcher}
+  alias X12Translator.{BatchProcessor, RemoteFetcher}
 
   @impl Mix.Task
   def run(args) do
@@ -87,7 +87,7 @@ defmodule Mix.Tasks.ProcessSftpImport do
   end
 
   defp resolve_hot_folder_dirs(opts) do
-    config = Application.get_env(:x12_bridge, :batch_hot_folder, [])
+    config = Application.get_env(:x12_translator, :batch_hot_folder, [])
 
     input_dir = opts[:input] || Keyword.get(config, :input_dir, "priv/uploads/input")
     output_dir = opts[:output] || Keyword.get(config, :output_dir, "priv/uploads/output")
@@ -96,7 +96,7 @@ defmodule Mix.Tasks.ProcessSftpImport do
   end
 
   defp default_source do
-    Application.get_env(:x12_bridge, :sftp_import, [])
+    Application.get_env(:x12_translator, :sftp_import, [])
     |> Keyword.get(:default_source)
   end
 

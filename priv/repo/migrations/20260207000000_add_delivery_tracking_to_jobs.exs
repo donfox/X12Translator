@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddDeliveryTrackingToJobs do
+defmodule X12Translator.Repo.Migrations.AddDeliveryTrackingToJobs do
   use Ecto.Migration
 
   def change do

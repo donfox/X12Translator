@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# X12Bridge Batch Processing Demo Runner
+# X12Translator Batch Processing Demo Runner
 # This script demonstrates the batch processing system
 
 echo "========================================="
-echo "X12Bridge Batch Processing Demo"
+echo "X12Translator Batch Processing Demo"
 echo "========================================="
 echo ""
 
 # Check if we're in the right directory
 if [ ! -f "mix.exs" ]; then
-    echo "Error: Not in X12Bridge directory"
-    echo "Please run from: /Users/donfox1/Work/X12Bridge"
+    echo "Error: Not in X12Translator directory"
+    echo "Please run from: /Users/donfox1/Work/X12Translator"
     exit 1
 fi
 
@@ -28,6 +28,6 @@ echo "========================================="
 echo ""
 echo "Next steps:"
 echo "  1. Check output: ls -la priv/batch_processing/output/"
-echo "  2. Run tests: mix test test/x12_bridge/batch_processor_test.exs"
+echo "  2. Run tests: mix test test/x12_translator/batch_processor_test.exs"
 echo "  3. Start IEx: iex -S mix"
 echo ""

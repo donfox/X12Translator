@@ -1,4 +1,4 @@
-defmodule X12Bridge.Repo.Migrations.AddX12ContentToJobs do
+defmodule X12Translator.Repo.Migrations.AddX12ContentToJobs do
   use Ecto.Migration
 
   def change do

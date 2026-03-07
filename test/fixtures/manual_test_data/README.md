@@ -43,7 +43,7 @@ unzip test/fixtures/x12/manual_test_data/databricks_batch_2026-01-09.zip -d /tmp
 
 # Process with iex
 iex -S mix
-iex> X12Bridge.BatchProcessor.process_directory("/tmp/test_batch")
+iex> X12Translator.BatchProcessor.process_directory("/tmp/test_batch")
 ```
 
 ### 3. Automated Testing
@@ -130,4 +130,4 @@ When adding a new ZIP archive:
 ---
 
 **Last Updated**: 2026-01-10
-**Maintained By**: X12Bridge Development Team
+**Maintained By**: X12Translator Development Team

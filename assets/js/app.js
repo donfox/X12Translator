@@ -32,43 +32,16 @@ console.log("🚀 app.js loading...")
 
 Hooks.RemoteUrlInput = {
   mounted() {
-    console.log("✅ RemoteUrlInput hook mounted")
-
-    // Aggressively disable all autocomplete features
+    // Disable autocomplete and password manager interference
     this.el.setAttribute('autocomplete', 'off')
     this.el.setAttribute('autocorrect', 'off')
     this.el.setAttribute('autocapitalize', 'off')
     this.el.setAttribute('spellcheck', 'false')
     this.el.setAttribute('data-form-type', 'other')
-    this.el.setAttribute('data-lpignore', 'true') // LastPass ignore
-
-    // Force clear on mount and after a delay (for browser autocomplete)
-    this.el.value = ""
-    setTimeout(() => { this.el.value = "" }, 100)
-    setTimeout(() => { this.el.value = "" }, 500)
-
-    // Prevent LiveView from interfering
-    this.el.setAttribute('data-phx-update', 'ignore')
-
-    // Allow normal input behavior
-    this.el.addEventListener('input', (e) => {
-      console.log("Input value:", e.target.value)
-    })
-
-    // Clear any browser-filled values on focus
-    this.el.addEventListener('focus', () => {
-      if (this.el.value && this.el.value.includes('github.com')) {
-        console.log("Clearing browser-filled value")
-        this.el.value = ""
-      }
-    })
+    this.el.setAttribute('data-lpignore', 'true')
   },
   updated() {
-    // If LiveView tries to update, force clear again
-    if (this.el.value !== "") {
-      console.log("LiveView tried to update, forcing clear")
-      this.el.value = ""
-    }
+    // No-op: let LiveView manage the value naturally
   }
 }
 

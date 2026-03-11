@@ -101,9 +101,19 @@ defmodule X12Translator.BatchProcessor do
     allowed_extensions = hot_config.allowed_extensions
     batch_name = hot_config.batch_name || build_batch_name("hot_folder")
 
-    Logger.info("Scanning input directory #{input_dir} for X12 files")
+    # Use explicit file list if provided, otherwise scan directory
+    explicit_files = Map.get(opts_map, :files)
 
-    with {:ok, files} <- scan_directory_for_extensions(input_dir, allowed_extensions),
+    file_source =
+      if explicit_files do
+        Logger.info("Processing #{length(explicit_files)} explicitly provided files")
+        {:ok, explicit_files}
+      else
+        Logger.info("Scanning input directory #{input_dir} for X12 files")
+        scan_directory_for_extensions(input_dir, allowed_extensions)
+      end
+
+    with {:ok, files} <- file_source,
          {:ok, %BatchResult{} = result} <-
            process_files_to_database(files, batch_name, config, file_metadata, submitted_by),
          {:ok, output_summary} <-

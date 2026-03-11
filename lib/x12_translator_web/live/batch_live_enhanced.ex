@@ -150,6 +150,7 @@ defmodule X12TranslatorWeb.BatchLiveEnhanced do
             batch_opts = %{
               input_dir: input_dir,
               output_dir: output_dir,
+              files: copied_files,
               batch_name: "Remote Import - #{extract_filename(source)}",
               file_metadata: metadata,
               submitted_by: String.trim(submitted_by)
@@ -1228,8 +1229,10 @@ defmodule X12TranslatorWeb.BatchLiveEnhanced do
               </div>
               
     <!-- SFTP Credentials (shown when URL starts with sftp://) -->
-              <%= if @show_sftp_fields do %>
-                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+                <div class={[
+                  "p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3",
+                  !@show_sftp_fields && "hidden"
+                ]}>
                   <h4 class="font-medium text-blue-900 text-sm">🔐 SFTP Credentials</h4>
                   <div class="grid grid-cols-3 gap-3">
                     <div>
@@ -1276,7 +1279,6 @@ defmodule X12TranslatorWeb.BatchLiveEnhanced do
                     Enter your SFTP server credentials. The hostname is taken from the URL above.
                   </p>
                 </div>
-              <% end %>
 
               <button
                 type="submit"

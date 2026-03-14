@@ -8,7 +8,8 @@ defmodule X12Translator.Conversions do
   import Ecto.Query
   alias X12Translator.Repo
   alias X12Translator.Conversions.{Batch, Job}
-  alias X12Translator.X12.{ClaimSplitter, Converter, RoundtripValidator, Verifier}
+  alias X12Translator.Webhook
+  alias X12Translator.X12.{ClaimSplitter, Converter, RoundtripValidator, SegmentMapper, Verifier}
 
   ## Batch functions
 
@@ -162,9 +163,12 @@ defmodule X12Translator.Conversions do
         # STEP 2: Round-trip validation passed, proceed with conversion
         case Converter.convert_content(file_content) do
           {:ok, json} ->
+            # Map flat segments to semantic claim JSON
+            semantic_json = map_to_semantic_json(json)
+
             %{
               status: "completed",
-              json_result: json,
+              json_result: semantic_json,
               processing_time_ms: System.monotonic_time(:millisecond) - start_time,
               roundtrip_valid: true,
               roundtrip_diff: nil,
@@ -393,9 +397,12 @@ defmodule X12Translator.Conversions do
             {:ok, json} ->
               processing_time = System.monotonic_time(:millisecond) - start_time
 
+              # Map flat segments to semantic claim JSON
+              semantic_json = map_to_semantic_json(json)
+
               update_job(job, %{
                 status: "translated",
-                json_result: json,
+                json_result: semantic_json,
                 processing_time_ms: processing_time,
                 roundtrip_valid: true,
                 roundtrip_diff: nil,
@@ -490,6 +497,16 @@ defmodule X12Translator.Conversions do
        total_claims_charged}
     )
 
+    # POST translated claims to webhook (fire-and-forget, won't block the response)
+    if translated_count > 0 do
+      translated_jobs =
+        Job
+        |> where([j], j.batch_id == ^batch_id and j.status == "translated")
+        |> Repo.all()
+
+      Task.start(fn -> Webhook.send_batch(batch_id, translated_jobs) end)
+    end
+
     {:ok, get_batch!(batch_id)}
   end
 
@@ -557,5 +574,20 @@ defmodule X12Translator.Conversions do
     Job
     |> where([j], j.batch_id == ^batch_id and j.status == ^status)
     |> Repo.aggregate(:count)
+  end
+
+  # Transforms flat all_segments JSON into semantic claim JSON.
+  # Falls back to the original flat JSON if mapping fails.
+  defp map_to_semantic_json(flat_json) do
+    case SegmentMapper.map_from_json(flat_json) do
+      {:ok, semantic_map} ->
+        case Jason.encode(semantic_map, pretty: true) do
+          {:ok, encoded} -> encoded
+          {:error, _} -> flat_json
+        end
+
+      {:error, _} ->
+        flat_json
+    end
   end
 end

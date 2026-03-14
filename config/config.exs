@@ -75,6 +75,10 @@ config :x12_translator, :batch_retention,
   # Keep only the 50 most recent batches in development
   max_batches: 50
 
+# Configure webhook for posting translated claims
+config :x12_translator, :webhook,
+  url: "http://localhost:4000/api/x12-batch-ingest"
+
 # Configure remote batch fetcher
 config :x12_translator, :remote_fetcher,
   download_timeout_ms: 60_000,

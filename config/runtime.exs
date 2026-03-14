@@ -34,6 +34,11 @@ if System.get_env("SFTP_HOST") do
     port: String.to_integer(System.get_env("SFTP_PORT") || "22")
 end
 
+# Webhook URL for posting translated claims (all environments)
+if webhook_url = System.get_env("WEBHOOK_URL") do
+  config :x12_translator, :webhook, url: webhook_url
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

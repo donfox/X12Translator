@@ -1,0 +1,56 @@
+{
+  "description": "Set 2: Syntactic errors — X12Translator should reject all files during verification stage",
+  "files": [
+    {
+      "type": "ERROR",
+      "filename": "syn_err_missing_isa.x12",
+      "description": "File does not start with ISA segment — starts with GS instead",
+      "expected_status": "failed_verification",
+      "expected_claims": 0,
+      "expected_syntactic_error": "ISA must be first segment"
+    },
+    {
+      "type": "ERROR",
+      "filename": "syn_err_control_number_mismatch.x12",
+      "description": "IEA control number 000999999 does not match ISA control number 000200002",
+      "expected_status": "failed_verification",
+      "expected_claims": 0,
+      "expected_syntactic_error": "IEA/ISA control number mismatch"
+    },
+    {
+      "type": "ERROR",
+      "filename": "syn_err_wrong_transaction_type.x12",
+      "description": "ST segment uses 850 (Purchase Order) instead of 837 (Healthcare Claim)",
+      "expected_status": "failed_verification",
+      "expected_claims": 0,
+      "expected_syntactic_error": "Transaction type must be 837"
+    },
+    {
+      "type": "ERROR",
+      "filename": "syn_err_invalid_date.x12",
+      "description": "DTP dates use month 13 (20261315) — invalid calendar date",
+      "expected_status": "failed_verification",
+      "expected_claims": 0,
+      "expected_syntactic_error": "Invalid date: month not 1-12"
+    },
+    {
+      "type": "ERROR",
+      "filename": "syn_err_missing_envelope.x12",
+      "description": "File is truncated — missing SE, GE, and IEA closing segments",
+      "expected_status": "failed_verification",
+      "expected_claims": 0,
+      "expected_syntactic_error": "Missing required SE/GE/IEA segments"
+    },
+    {
+      "type": "ERROR",
+      "filename": "syn_err_nonnumeric_clm.x12",
+      "description": "CLM amount is 'THREEHUNDRED' and SV1 charges are spelled out as words",
+      "expected_status": "failed_verification",
+      "expected_claims": 0,
+      "expected_syntactic_error": "CLM amount must be numeric"
+    }
+  ],
+  "batch_id": "batch_set2_syntactic_001",
+  "created_at": "2026-03-14T09:00:00Z",
+  "total_files": 6
+}

@@ -15,8 +15,10 @@ defmodule X12Translator.Application do
       X12Translator.Repo,
       {DNSCluster, query: Application.get_env(:x12_translator, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: X12Translator.PubSub},
-      # Start a worker by calling: X12Translator.Worker.start_link(arg)
-      # {X12Translator.Worker, arg},
+      # Quantum scheduler for automated fetch jobs
+      X12Translator.Scheduler,
+      # Polls medicaid_claims_checker for fetch config
+      X12Translator.ConfigPoller,
       # Start to serve requests, typically the last entry
       X12TranslatorWeb.Endpoint
     ]

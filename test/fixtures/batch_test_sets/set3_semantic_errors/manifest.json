@@ -1,0 +1,53 @@
+{
+  "description": "Set 3: Semantic errors — pass X12Translator syntax validation but trigger medicaid_claims_checker rules",
+  "files": [
+    {
+      "type": "837P",
+      "filename": "sem_err_future_service_date.x12",
+      "description": "Service dates set to June 2027 — triggers FutureServiceDate and ImpossibleDates rules",
+      "expected_status": "success",
+      "expected_claims": 1,
+      "expected_semantic_errors": ["FutureServiceDate", "ImpossibleDates"],
+      "expected_risk": "CriticalRisk"
+    },
+    {
+      "type": "837I",
+      "filename": "sem_err_extreme_amount.x12",
+      "description": "Inpatient claim totaling $900,000 — triggers ExtremeAmounts and ExcessiveTotalCharges rules",
+      "expected_status": "success",
+      "expected_claims": 1,
+      "expected_semantic_errors": ["ExtremeAmounts", "ExcessiveTotalCharges"],
+      "expected_risk": "HighRisk"
+    },
+    {
+      "type": "837P",
+      "filename": "sem_err_invalid_npi.x12",
+      "description": "Billing NPI 1111111111 and rendering NPI 0000000000 — fail Luhn-10 and NPPES lookup",
+      "expected_status": "success",
+      "expected_claims": 1,
+      "expected_semantic_errors": ["InvalidProviderNPI", "NPPESProviderLookup"],
+      "expected_risk": "CriticalRisk"
+    },
+    {
+      "type": "837P",
+      "filename": "sem_err_high_value_no_auth.x12",
+      "description": "Knee replacement claim for $75,000 with no authorization — triggers HighValueClaim and UnauthorizedProcedure",
+      "expected_status": "success",
+      "expected_claims": 1,
+      "expected_semantic_errors": ["HighValueClaim", "UnauthorizedProcedure"],
+      "expected_risk": "MediumRisk"
+    },
+    {
+      "type": "837P",
+      "filename": "sem_err_suspiciously_low.x12",
+      "description": "Office visit billed at $2.00 per service line — triggers SuspiciouslyLowCharge rule",
+      "expected_status": "success",
+      "expected_claims": 1,
+      "expected_semantic_errors": ["SuspiciouslyLowCharge"],
+      "expected_risk": "LowRisk"
+    }
+  ],
+  "batch_id": "batch_set3_semantic_001",
+  "created_at": "2026-03-14T10:00:00Z",
+  "total_files": 5
+}

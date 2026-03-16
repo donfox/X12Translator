@@ -79,6 +79,11 @@ config :x12_translator, :batch_retention,
 config :x12_translator, :webhook,
   url: "http://localhost:4000/api/x12-batch-ingest"
 
+# Configure config poller (pulls fetch schedule from medicaid_claims_checker)
+config :x12_translator, :config_poller,
+  url: "http://localhost:4000/api/fetch-config",
+  poll_interval_ms: 60_000
+
 # Configure remote batch fetcher
 config :x12_translator, :remote_fetcher,
   download_timeout_ms: 60_000,

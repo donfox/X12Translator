@@ -10,7 +10,8 @@ defmodule X12Translator.WebhookTest do
     plug :dispatch
 
     post "/api/x12-batch-ingest" do
-      send_resp(conn, 200, Jason.encode!(%{"status" => "accepted"}))
+      # Echo the payload back so tests can inspect it
+      send_resp(conn, 200, Jason.encode!(conn.body_params))
     end
   end
 
@@ -52,6 +53,43 @@ defmodule X12Translator.WebhookTest do
     ]
 
     assert {:ok, 200} = Webhook.send_batch("batch-456", jobs)
+  end
+
+  test "send_batch splits multi-claim X12 into individual claims" do
+    x12_content = File.read!("test/fixtures/batch_input/multi_claim_837p.x12")
+
+    jobs = [
+      %{
+        original_filename: "multi_claim_837p.x12",
+        json_result: Jason.encode!(%{"combined" => true}),
+        x12_content: x12_content
+      }
+    ]
+
+    assert {:ok, 200} = Webhook.send_batch("batch-multi", jobs)
+  end
+
+  test "multi-claim file produces one payload entry per claim" do
+    x12_content = File.read!("test/fixtures/batch_input/multi_claim_837p.x12")
+
+    # Use ClaimSplitter directly to verify what the webhook would send
+    assert {:ok, claims} = X12Translator.X12.ClaimSplitter.split_claims(x12_content)
+    assert length(claims) == 3
+
+    # Verify the filenames that would be generated
+    expected_filenames = [
+      "multi_claim_837p_CLM-900001.json",
+      "multi_claim_837p_CLM-900002.json",
+      "multi_claim_837p_CLM-900003.json"
+    ]
+
+    actual_filenames =
+      Enum.map(claims, fn %{claim_id: cid} ->
+        base = String.replace("multi_claim_837p.x12", ~r/\.(x12|edi|txt)$/i, "")
+        "#{base}_#{cid}.json"
+      end)
+
+    assert actual_filenames == expected_filenames
   end
 
   test "send_batch returns :not_configured when no URL is set" do

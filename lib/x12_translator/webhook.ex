@@ -1,9 +1,14 @@
 defmodule X12Translator.Webhook do
   @moduledoc """
   Sends translated claim JSON to external systems via HTTP POST.
+
+  Multi-claim X12 files are split into individual claims before sending,
+  so each entry in the payload represents exactly one claim.
   """
 
   require Logger
+
+  alias X12Translator.X12.{ClaimSplitter, Converter, SegmentMapper}
 
   @doc """
   Posts a batch of translated claims to the configured webhook endpoint.
@@ -24,13 +29,7 @@ defmodule X12Translator.Webhook do
     url = webhook_url()
 
     if url do
-      claims =
-        Enum.map(jobs, fn job ->
-          %{
-            "filename" => job.original_filename,
-            "claim" => decode_json_result(job.json_result)
-          }
-        end)
+      claims = Enum.flat_map(jobs, &expand_job_claims/1)
 
       payload = %{"batch_id" => batch_id, "claims" => claims}
 
@@ -56,6 +55,49 @@ defmodule X12Translator.Webhook do
       Logger.debug("Webhook not configured, skipping POST for batch #{batch_id}")
       {:ok, :not_configured}
     end
+  end
+
+  # Splits a job into individual claim entries for the webhook payload.
+  # Multi-claim X12 files produce one entry per claim; single-claim files
+  # produce one entry using the original filename.
+  defp expand_job_claims(job) do
+    if Map.get(job, :x12_content) do
+      case ClaimSplitter.split_claims_to_x12(job.x12_content) do
+        {:ok, nil} ->
+          [%{"filename" => to_json_filename(job.original_filename),
+             "claim" => decode_json_result(job.json_result)}]
+
+        {:ok, claims} ->
+          Enum.flat_map(claims, fn %{claim_id: claim_id, x12_content: x12} ->
+            with {:ok, flat_json} <- Converter.convert_content(x12),
+                 {:ok, semantic} <- SegmentMapper.map_from_json(flat_json) do
+              [%{"filename" => to_split_filename(job.original_filename, claim_id),
+                 "claim" => semantic}]
+            else
+              {:error, reason} ->
+                Logger.warning("Conversion failed for split claim #{claim_id} in #{job.original_filename}: #{inspect(reason)}")
+                []
+            end
+          end)
+
+        {:error, reason} ->
+          Logger.warning("Claim splitting failed for #{job.original_filename}: #{inspect(reason)}, sending unsplit")
+          [%{"filename" => to_json_filename(job.original_filename),
+             "claim" => decode_json_result(job.json_result)}]
+      end
+    else
+      [%{"filename" => to_json_filename(job.original_filename),
+         "claim" => decode_json_result(job.json_result)}]
+    end
+  end
+
+  defp to_json_filename(filename) do
+    String.replace(filename, ~r/\.(x12|edi|txt)$/i, ".json")
+  end
+
+  defp to_split_filename(original_filename, claim_id) do
+    base = String.replace(original_filename, ~r/\.(x12|edi|txt)$/i, "")
+    "#{base}_#{claim_id}.json"
   end
 
   defp webhook_url do

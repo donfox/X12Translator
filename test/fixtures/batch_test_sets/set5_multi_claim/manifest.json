@@ -1,0 +1,49 @@
+{
+  "description": "Set 5: Multi-claim X12 files — each file contains multiple valid claims that must be split into individual JSON outputs",
+  "files": [
+    {
+      "type": "837P",
+      "filename": "multi_837p_family_visit.x12",
+      "description": "Family visit: father (URI, $285), daughter (flu, $225), son (flu + vaccine, $195) — same provider, same date",
+      "expected_status": "success",
+      "expected_claims": 3,
+      "expected_claim_ids": ["CLM500001", "CLM500002", "CLM500003"],
+      "expected_split_filenames": [
+        "multi_837p_family_visit_CLM500001.json",
+        "multi_837p_family_visit_CLM500002.json",
+        "multi_837p_family_visit_CLM500003.json"
+      ],
+      "expected_semantic_errors": []
+    },
+    {
+      "type": "837P",
+      "filename": "multi_837p_lab_panel.x12",
+      "description": "Lab panel batch: diabetic patient ($335) and lipid panel patient ($280) — same lab, same date",
+      "expected_status": "success",
+      "expected_claims": 2,
+      "expected_claim_ids": ["CLM500004", "CLM500005"],
+      "expected_split_filenames": [
+        "multi_837p_lab_panel_CLM500004.json",
+        "multi_837p_lab_panel_CLM500005.json"
+      ],
+      "expected_semantic_errors": []
+    },
+    {
+      "type": "837I",
+      "filename": "multi_837i_inpatient.x12",
+      "description": "Two inpatient stays: pneumonia 3-day ($3,800) and appendicitis 2-day ($2,950) — same hospital",
+      "expected_status": "success",
+      "expected_claims": 2,
+      "expected_claim_ids": ["CLM500006", "CLM500007"],
+      "expected_split_filenames": [
+        "multi_837i_inpatient_CLM500006.json",
+        "multi_837i_inpatient_CLM500007.json"
+      ],
+      "expected_semantic_errors": []
+    }
+  ],
+  "batch_id": "batch_set5_multi_claim_001",
+  "created_at": "2026-03-19T08:00:00Z",
+  "total_files": 3,
+  "total_claims": 7
+}

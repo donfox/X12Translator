@@ -51,6 +51,9 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Use tzdata for timezone support (required by Quantum timezone config)
+config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
+
 # Configure custom MIME types for X12 EDI files
 config :mime, :types, %{
   "application/x12" => ["x12"],
@@ -74,6 +77,11 @@ config :x12_translator, :web_uploads,
 config :x12_translator, :batch_retention,
   # Keep only the 50 most recent batches in development
   max_batches: 50
+
+# Quantum scheduler for dynamic fetch jobs (managed by ConfigPoller)
+config :x12_translator, X12Translator.Scheduler,
+  jobs: [],
+  timezone: "America/New_York"
 
 # Configure webhook for posting translated claims
 config :x12_translator, :webhook,

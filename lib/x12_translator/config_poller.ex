@@ -14,8 +14,22 @@ defmodule X12Translator.ConfigPoller do
 
   @impl true
   def init(_opts) do
+    # Add a diagnostic heartbeat job — fires every minute to prove Quantum works
+    heartbeat =
+      X12Translator.Scheduler.new_job()
+      |> Quantum.Job.set_name(:heartbeat)
+      |> Quantum.Job.set_schedule(Crontab.CronExpression.Parser.parse!("* * * * *"))
+      |> Quantum.Job.set_task({__MODULE__, :heartbeat, []})
+
+    X12Translator.Scheduler.add_job(heartbeat)
+    Logger.info("ConfigPoller: added heartbeat job (fires every minute)")
+
     send(self(), :poll)
     {:ok, %{last_config: nil}}
+  end
+
+  def heartbeat do
+    Logger.info("ConfigPoller: ♥ heartbeat — Quantum is alive at #{DateTime.utc_now()}")
   end
 
   @impl true
@@ -24,16 +38,21 @@ defmodule X12Translator.ConfigPoller do
 
     case fetch_config() do
       {:ok, config} ->
-        if config != state.last_config do
-          Logger.info("Fetch config changed, updating Quantum schedules")
+        # Build a stable fingerprint: only source IDs, URIs, types, and schedule expressions
+        comparable = config_fingerprint(config)
+
+        if comparable != state.last_config do
+          source_count = length(config["fetch_sources"] || [])
+          schedule_count = config["fetch_sources"] |> List.wrap() |> Enum.flat_map(& &1["schedules"] || []) |> length()
+          Logger.info("ConfigPoller: config changed — #{source_count} source(s), #{schedule_count} schedule(s)")
           update_schedules(config)
-          {:noreply, %{state | last_config: config}}
+          {:noreply, %{state | last_config: comparable}}
         else
           {:noreply, state}
         end
 
       {:error, reason} ->
-        Logger.warning("Failed to fetch config from medicaid_claims_checker: #{inspect(reason)}")
+        Logger.warning("ConfigPoller: failed to fetch config — #{inspect(reason)}")
         {:noreply, state}
     end
   end
@@ -79,16 +98,22 @@ defmodule X12Translator.ConfigPoller do
             build_interval_schedule(schedule["interval_seconds"])
           end
 
+        timezone = Application.get_env(:x12_translator, X12Translator.Scheduler, []) |> Keyword.get(:timezone, "Etc/UTC")
+
         job =
           X12Translator.Scheduler.new_job()
           |> Quantum.Job.set_name(job_name)
           |> Quantum.Job.set_schedule(quantum_schedule)
+          |> Quantum.Job.set_timezone(timezone)
           |> Quantum.Job.set_task({X12Translator.FetchRunner, :run, [source]})
 
         X12Translator.Scheduler.add_job(job)
-        Logger.info("Added fetch job #{job_name} for source '#{source["name"]}'")
+        Logger.info("ConfigPoller: added job #{job_name} — cron: #{schedule["cron_expression"] || "interval #{schedule["interval_seconds"]}s"} (tz: #{timezone})")
       end)
     end)
+
+    active_jobs = X12Translator.Scheduler.jobs() |> Enum.map(fn {name, _} -> name end)
+    Logger.info("ConfigPoller: active Quantum jobs: #{inspect(active_jobs)}")
   end
 
   defp update_schedules(_), do: :ok
@@ -108,4 +133,30 @@ defmodule X12Translator.ConfigPoller do
   end
 
   defp build_interval_schedule(_), do: Crontab.CronExpression.Parser.parse!("0 * * * *")
+
+  defp config_fingerprint(%{"fetch_sources" => sources}) when is_list(sources) do
+    Enum.map(sources, fn source ->
+      schedules =
+        (source["schedules"] || [])
+        |> Enum.map(fn s ->
+          %{
+            "id" => s["id"],
+            "cron_expression" => s["cron_expression"],
+            "interval_seconds" => s["interval_seconds"],
+            "enabled" => s["enabled"]
+          }
+        end)
+        |> Enum.sort_by(& &1["id"])
+
+      %{
+        "id" => source["id"],
+        "uri" => source["uri"],
+        "source_type" => source["source_type"],
+        "schedules" => schedules
+      }
+    end)
+    |> Enum.sort_by(& &1["id"])
+  end
+
+  defp config_fingerprint(_), do: nil
 end

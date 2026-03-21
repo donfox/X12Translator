@@ -65,7 +65,8 @@ defmodule X12Translator.MixProject do
       {:bandit, "~> 1.5"},
       {:req, "~> 0.5"},
       {:quantum, "~> 3.5"},
-      {:crontab, "~> 1.1"}
+      {:crontab, "~> 1.1"},
+      {:tzdata, "~> 1.1"}
     ]
   end
 

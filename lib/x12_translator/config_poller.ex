@@ -25,35 +25,62 @@ defmodule X12Translator.ConfigPoller do
     Logger.info("ConfigPoller: added heartbeat job (fires every minute)")
 
     send(self(), :poll)
-    {:ok, %{last_config: nil}}
+    {:ok, %{last_config: nil, consecutive_failures: 0, standby: false}}
   end
 
   def heartbeat do
     Logger.info("ConfigPoller: ♥ heartbeat — Quantum is alive at #{DateTime.utc_now()}")
   end
 
+  @max_failures_before_standby 3
+  @standby_poll_interval_ms 300_000
+
   @impl true
+  def handle_info(:poll, %{standby: true} = state) do
+    # In standby mode, poll infrequently to detect when the service comes up
+    Process.send_after(self(), :poll, @standby_poll_interval_ms)
+
+    case fetch_config() do
+      {:ok, config} ->
+        Logger.info("ConfigPoller: medicaid_claims_checker is now available, resuming normal polling")
+        handle_config_success(config, %{state | standby: false, consecutive_failures: 0})
+
+      {:error, _reason} ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(:poll, state) do
     schedule_next_poll()
 
     case fetch_config() do
       {:ok, config} ->
-        # Build a stable fingerprint: only source IDs, URIs, types, and schedule expressions
-        comparable = config_fingerprint(config)
-
-        if comparable != state.last_config do
-          source_count = length(config["fetch_sources"] || [])
-          schedule_count = config["fetch_sources"] |> List.wrap() |> Enum.flat_map(& &1["schedules"] || []) |> length()
-          Logger.info("ConfigPoller: config changed — #{source_count} source(s), #{schedule_count} schedule(s)")
-          update_schedules(config)
-          {:noreply, %{state | last_config: comparable}}
-        else
-          {:noreply, state}
-        end
+        handle_config_success(config, %{state | consecutive_failures: 0})
 
       {:error, reason} ->
-        Logger.warning("ConfigPoller: failed to fetch config — #{inspect(reason)}")
-        {:noreply, state}
+        failures = state.consecutive_failures + 1
+
+        if failures >= @max_failures_before_standby do
+          Logger.info("ConfigPoller: medicaid_claims_checker not available, entering standby mode")
+          {:noreply, %{state | consecutive_failures: failures, standby: true}}
+        else
+          Logger.debug("ConfigPoller: fetch attempt #{failures}/#{@max_failures_before_standby} failed — #{inspect(reason)}")
+          {:noreply, %{state | consecutive_failures: failures}}
+        end
+    end
+  end
+
+  defp handle_config_success(config, state) do
+    comparable = config_fingerprint(config)
+
+    if comparable != state.last_config do
+      source_count = length(config["fetch_sources"] || [])
+      schedule_count = config["fetch_sources"] |> List.wrap() |> Enum.flat_map(& &1["schedules"] || []) |> length()
+      Logger.info("ConfigPoller: config changed — #{source_count} source(s), #{schedule_count} schedule(s)")
+      update_schedules(config)
+      {:noreply, %{state | last_config: comparable}}
+    else
+      {:noreply, state}
     end
   end
 

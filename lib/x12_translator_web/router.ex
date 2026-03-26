@@ -22,8 +22,10 @@ defmodule X12TranslatorWeb.Router do
     live "/converter", BatchLiveEnhanced
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", X12TranslatorWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", X12TranslatorWeb do
+    pipe_through :api
+
+    post "/translate", TranslateController, :create
+    get "/translate/:batch_id", TranslateController, :show
+  end
 end

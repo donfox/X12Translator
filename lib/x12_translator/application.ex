@@ -15,9 +15,11 @@ defmodule X12Translator.Application do
       X12Translator.Repo,
       {DNSCluster, query: Application.get_env(:x12_translator, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: X12Translator.PubSub},
+      # Task supervisor for async API translate pipeline
+      {Task.Supervisor, name: X12Translator.TaskSupervisor},
       # Quantum scheduler for automated fetch jobs
       X12Translator.Scheduler,
-      # Polls medicaid_claims_checker for fetch config
+      # Polls medicaid_claims_checker for fetch config (auto-detects availability)
       X12Translator.ConfigPoller,
       # Start to serve requests, typically the last entry
       X12TranslatorWeb.Endpoint

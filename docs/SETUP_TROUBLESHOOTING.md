@@ -154,4 +154,4 @@ bash priv/scripts/check_setup.sh
 1. Run validation: `bash priv/scripts/check_setup.sh`
 2. Check environment: `env | grep PG`
 3. Test PostgreSQL: `psql -h localhost -U postgres -c "SELECT 1"`
-4. See [GUIDE.md](docs/GUIDE.md) for detailed setup instructions
+4. See [README.md](../README.md) and [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for detailed setup instructions

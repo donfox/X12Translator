@@ -1,7 +1,5 @@
 # X12Translator
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-
 **Convert X12 EDI healthcare claims (837P/I/D) to clean, semantic JSON.**
 
 A focused, single-purpose Elixir application that parses and validates X12 EDI files, converting them into developer-friendly JSON format.
@@ -35,7 +33,7 @@ mix phx.server
 
 That's it! Load a sample file and convert to JSON.
 
-**Note:** `mix setup` checks for environment variable conflicts automatically. See [SETUP_TROUBLESHOOTING.md](SETUP_TROUBLESHOOTING.md) if you encounter issues.
+**Note:** `mix setup` checks for environment variable conflicts automatically. See [SETUP_TROUBLESHOOTING.md](docs/SETUP_TROUBLESHOOTING.md) if you encounter issues.
 
 ---
 
@@ -254,13 +252,7 @@ fly secrets set SECRET_KEY_BASE=<secret>
 fly deploy
 ```
 
-See [GUIDE.md](docs/GUIDE.md) for Docker, Railway, and other deployment options.
-
----
-
-## License
-
-This project is currently unlicensed. Contact the owner for usage rights.
+See [SETUP_TROUBLESHOOTING.md](docs/SETUP_TROUBLESHOOTING.md) and [WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md) for platform-specific setup and troubleshooting.
 
 ---
 
@@ -293,9 +285,9 @@ This is currently a solo project. If you'd like to contribute or use this commer
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is proprietary and confidential. Usage, copying, modification, or distribution is not permitted without prior written consent from the owner.
 
-Copyright (c) 2026 Don Fox
+See [LICENSE](LICENSE) for full terms.
 
 ---
 

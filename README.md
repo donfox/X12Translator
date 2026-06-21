@@ -1,5 +1,7 @@
 # X12Translator
 
+> **eMRTS Intern Project:** This project is one of four instructional projects developed as part of intern training at eMRTS.
+
 **Convert X12 EDI healthcare claims (837P/I/D) to clean, semantic JSON.**
 
 A focused, single-purpose Elixir application that parses and validates X12 EDI files, converting them into developer-friendly JSON format.

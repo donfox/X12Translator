@@ -1,10 +1,18 @@
 # X12Translator
 
-> **eMRTS Intern Project:** This project is one of four instructional projects developed as part of intern training at eMRTS.
-
 **Convert X12 EDI healthcare claims (837P/I/D) to clean, semantic JSON.**
 
 A focused, single-purpose Elixir application that parses and validates X12 EDI files, converting them into developer-friendly JSON format.
+
+## Portfolio Context
+
+I built X12Translator for public portfolio display and technical discussion with interns. Interns were discussion participants only; they did not contribute code and are not co-authors. This is an independent demonstration/proof of concept, not a production claims-processing service.
+
+X12Translator is one of three independent healthcare-related projects in this portfolio. They explore different parts of the healthcare data space and are not integrated into a shared runtime or end-to-end system:
+
+- **X12Translator** parses and translates X12 837 claim files.
+- [Medicaid Claims Checker](https://github.com/donfox/medicaid_claims_checker) evaluates claims against configurable rules and provider data.
+- [Provider Vault](https://github.com/donfox/provider-vault) demonstrates provider-directory features and AI engineering patterns.
 
 ---
 
